@@ -1,12 +1,14 @@
 from typing import Dict, List, Set
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
 from .ts import method_signature_from_node
 
 
-def instrument_java_file(java_file: str, target_signatures: List[str]) -> bool:
+def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[str]:
     if not target_signatures:
-        return False
+        return []
     language = get_language("java")
     parser = Parser()
     parser.set_language(language)
@@ -14,22 +16,24 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> bool:
         with open(java_file, "rb") as f:
             src = f.read()
     except FileNotFoundError:
-        return False
+        return []
 
     tree = parser.parse(src)
     cursor = tree.walk()
     stack = [cursor.node]
     method_nodes = []
+    matched_sigs: List[str] = []
     while stack:
         n = stack.pop()
         if n.type in ("method_declaration", "constructor_declaration"):
             sig = method_signature_from_node(src, n)
             if sig in target_signatures:
                 method_nodes.append(n)
+                matched_sigs.append(sig)
         for i in range(n.child_count):
             stack.append(n.child(i))
     if not method_nodes:
-        return False
+        return []
 
     text = src.decode("utf-8")
     import_needed = ["import org.instrument.DumpObj;", "import org.instrument.DebugDump;"]
@@ -95,9 +99,9 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> bool:
         map_init = b"\njava.util.Map params = new java.util.LinkedHashMap();\n"
         for pn in param_names:
             map_init += (b"params.put(\"" + pn.encode("utf-8") + b"\", " + pn.encode("utf-8") + b");\n")
-        id_var = b"String dumpId = DebugDump.newInvocationId();\n"
+        id_var = b"String dumpId = DebugDump.newInvocationId();\nboolean __dumped = false;\n"
         entry = id_var + map_init + b"DebugDump.writeEntry(" + target_expr + b", params, dumpId);\ntry "
-        exitf = b" finally { }\n"
+        exitf = b" finally { if (!__dumped) { java.util.Map params = new java.util.LinkedHashMap(); DebugDump.writeExit(" + target_expr + b", params, null, dumpId); } }\n"
 
         is_constructor = (n.type == "constructor_declaration")
         content = inner[1:-1]
@@ -189,25 +193,34 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> bool:
                     break
             if expr_child is not None:
                 expr_bytes = new_src3[expr_child.start_byte:expr_child.end_byte]
-                replacement = b"{ DebugDump.writeExit(" + self_expr + b", params, (Object)(" + expr_bytes + b"), dumpId); return " + expr_bytes + b"; }"
+                replacement = (
+                    b"{ java.util.Map params = new java.util.LinkedHashMap(); "
+                    b"DebugDump.writeExit(" + self_expr + b", params, (Object)(" + expr_bytes + b"), dumpId); __dumped = true; return " + expr_bytes + b"; }"
+                )
             else:
-                replacement = b"{ DebugDump.writeExit(" + self_expr + b", params, null, dumpId); return; }"
+                replacement = (
+                    b"{ java.util.Map params = new java.util.LinkedHashMap(); "
+                    b"DebugDump.writeExit(" + self_expr + b", params, null, dumpId); __dumped = true; return; }"
+                )
             new_src3[r.start_byte:r.end_byte] = replacement
 
     with open(java_file, "wb") as f:
         f.write(bytes(new_src3))
-    return True
+    # Return the list of method signatures that were instrumented in this file
+    return sorted(set(matched_sigs))
 
 
-def instrument_changed_methods(changed_methods: Dict[str, List[str]]) -> int:
-    count = 0
+def instrument_changed_methods(changed_methods: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Instrument methods per file and return mapping of file -> instrumented signatures."""
+    result: Dict[str, List[str]] = {}
     for fpath, sigs in changed_methods.items():
         try:
-            if instrument_java_file(fpath, sigs):
-                count += 1
+            instrumented = instrument_java_file(fpath, sigs)
+            if instrumented:
+                result[fpath] = sorted(instrumented)
         except Exception:
             # Keep going on best-effort; caller can log
             continue
-    return count
+    return result
 
 

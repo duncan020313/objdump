@@ -1,9 +1,12 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import os
 import logging
+import json
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 
 from .logging_setup import configure_logging
-from .types import BuildSystem
+from .jt_types import BuildSystem
 from . import defects4j
 from .build_systems import detect
 from .build_systems.maven import add_dependencies as add_maven
@@ -25,7 +28,7 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
     download_files(lib_dir, items)
 
 
-def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False) -> None:
+def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False, report_file: Optional[str] = None) -> None:
     configure_logging()
     log = logging.getLogger("jackson_installer")
 
@@ -53,12 +56,16 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
         add_maven(pom_path, jackson_version)
     elif build_system == BuildSystem.ANT:
         log.info("Detected Ant build system")
-        build_xml = os.path.join(work_dir, "build.xml")
-        add_ant(build_xml, jackson_version)
     else:
         raise RuntimeError("Unknown build system")
+    # Defects4J uses Ant under the hood; ensure Ant build has Jackson jars regardless
+    build_xml = os.path.join(work_dir, "build.xml")
+    if os.path.isfile(build_xml):
+        add_ant(build_xml, jackson_version)
 
-    defects4j.compile(work_dir)
+    out_file = os.path.join(work_dir, "objdump.jsonl")
+    env_vars = {"OBJDUMP_OUT": out_file}
+    defects4j.compile(work_dir, env=env_vars)
 
     classes_dir = defects4j.export(work_dir, "dir.src.classes") or ""
     modified_classes = (defects4j.export(work_dir, "classes.modified") or "").splitlines()
@@ -93,8 +100,9 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     ensure_helper_sources(work_dir, src_java_rel)
     download_jackson_jars(work_dir, jackson_version)
 
+    instrumented_map: Dict[str, List[str]] = {}
     if changed:
-        instrument_changed_methods(changed)
+        instrumented_map = instrument_changed_methods(changed)
     else:
         if instrument_all_modified and modified_class_paths:
             # Collect all methods in modified files
@@ -114,7 +122,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
                     t = parser.parse(s)
                     cursor = t.walk()
                     stack = [cursor.node]
-                    sigs: Set[str] = set()  # type: ignore[name-defined]
+                    sigs: Set[str] = set()
                     from .instrumentation.ts import method_signature_from_node
                     while stack:
                         n = stack.pop()
@@ -127,12 +135,33 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
                 except Exception:
                     continue
             if all_map:
-                instrument_changed_methods(all_map)
+                instrumented_map = instrument_changed_methods(all_map)
 
-    defects4j.compile(work_dir)
+    # Emit instrumented method paths report (stdout JSON and file)
+    try:
+        flat: List[str] = []
+        for fpath, sigs in instrumented_map.items():
+            abs_path = os.path.abspath(fpath)
+            for sig in sigs:
+                flat.append(f"{abs_path}::{sig}")
+        if report_file is None:
+            report_file = os.path.join(work_dir, "instrumented_methods.json")
+        payload = json.dumps(sorted(flat))
+        print(payload)
+        os.makedirs(os.path.dirname(report_file), exist_ok=True)
+        with open(report_file, "w", encoding="utf-8") as rf:
+            rf.write(payload)
+    except Exception:
+        # Do not fail the workflow on reporting errors
+        pass
+
+    defects4j.compile(work_dir, env=env_vars)
     tests = defects4j.export(work_dir, "tests.trigger")
     if tests:
         names = [t.strip() for t in tests.splitlines() if t.strip()]
-        defects4j.test(work_dir, names)
+        defects4j.test(work_dir, names, env=env_vars)
+    else:
+        # Fall back to running the full test suite if no triggering tests are exported
+        defects4j.test(work_dir, env=env_vars)
 
 

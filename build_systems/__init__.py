@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-from jackson_installer.types import BuildSystem
+from objdump.jt_types import BuildSystem
 
 
 def detect(project_dir: str) -> Optional[BuildSystem]:

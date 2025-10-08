@@ -1,4 +1,6 @@
 from typing import List, Set, Tuple
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
 

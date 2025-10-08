@@ -12,11 +12,12 @@ def main() -> None:
     p_all.add_argument("work_dir")
     p_all.add_argument("--jackson-version", dest="jackson_version", default="2.13.0")
     p_all.add_argument("--instrument-all-modified", action="store_true")
+    p_all.add_argument("--report-file", dest="report_file")
 
     args = parser.parse_args()
 
     if args.cmd == "all":
-        run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.instrument_all_modified)
+        run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.instrument_all_modified, args.report_file)
 
 
 if __name__ == "__main__":

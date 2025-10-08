@@ -47,7 +47,7 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
             "  public static void writeExit(Object self, Map params, Object ret, String id) { write(self, params, ret, id, \"exit\"); }\n"
             "  private static synchronized void write(Object self, Map params, Object ret, String id, String phase) {\n"
             "    try {\n"
-            "      Map<String,Object> rec = new LinkedHashMap<>();\n"
+            "      Map<String,Object> rec = new LinkedHashMap<String,Object>();\n"
             "      rec.put(\"id\", id);\n"
             "      rec.put(\"phase\", phase);\n"
             "      rec.put(\"self\", self);\n"

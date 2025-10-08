@@ -1,5 +1,6 @@
 from typing import List, Optional
 from .io.shell import run
+from typing import Dict
 
 
 def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -> bool:
@@ -7,18 +8,41 @@ def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -
     return res.code == 0
 
 
-def compile(work_dir: str) -> bool:
-    res = run(["defects4j", "compile"], cwd=work_dir)
-    return res.code == 0
+def compile(work_dir: str, env: Dict[str, str] = None) -> bool:
+    res = run(["defects4j", "compile"], cwd=work_dir, env=env)
+    if res.code != 0:
+        print("[defects4j compile] failed")
+        if res.out:
+            print(res.out)
+        if res.err:
+            print(res.err)
+        return False
+    return True
 
 
-def test(work_dir: str, tests: Optional[List[str]] = None) -> bool:
+def test(work_dir: str, tests: Optional[List[str]] = None, env: Dict[str, str] = None) -> bool:
     if tests:
-        joined = ",".join(tests)
-        res = run(["defects4j", "test", "-t", joined], cwd=work_dir)
+        all_ok = True
+        for entry in tests:
+            res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env)
+            if res.code != 0:
+                all_ok = False
+                print("[defects4j test] failed for", entry)
+                if res.out:
+                    print(res.out)
+                if res.err:
+                    print(res.err)
+        return all_ok
     else:
-        res = run(["defects4j", "test"], cwd=work_dir)
-    return res.code == 0
+        res = run(["defects4j", "test"], cwd=work_dir, env=env)
+        if res.code != 0:
+            print("[defects4j test] failed")
+            if res.out:
+                print(res.out)
+            if res.err:
+                print(res.err)
+            return False
+        return True
 
 
 def export(work_dir: str, prop: str) -> Optional[str]:
