@@ -1,5 +1,5 @@
 from typing import List, Optional
-from .io.shell import run
+from .objdump_io.shell import run
 from typing import Dict
 
 

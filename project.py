@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Set
 import os
+import re
 import logging
 import json
 import warnings
@@ -15,7 +16,7 @@ from .instrumentation.diff import compute_file_diff_ranges_both
 from .instrumentation.ts import extract_changed_methods
 from .instrumentation.instrumenter import instrument_changed_methods
 from .instrumentation.helpers import ensure_helper_sources
-from .io.net import download_files
+from .objdump_io.net import download_files
 
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
@@ -63,7 +64,8 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     if os.path.isfile(build_xml):
         add_ant(build_xml, jackson_version)
 
-    out_file = os.path.join(work_dir, "objdump.jsonl")
+    # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
+    out_file = os.path.join(work_dir, "dump.jsonl")
     env_vars = {"OBJDUMP_OUT": out_file}
     defects4j.compile(work_dir, env=env_vars)
 
@@ -155,11 +157,21 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
         # Do not fail the workflow on reporting errors
         pass
 
+    # Prepare dumps directory for per-test outputs
+    dumps_dir = os.path.join(work_dir, "dumps")
+    try:
+        os.makedirs(dumps_dir, exist_ok=True)
+    except Exception:
+        pass
+
     defects4j.compile(work_dir, env=env_vars)
     tests = defects4j.export(work_dir, "tests.trigger")
     if tests:
         names = [t.strip() for t in tests.splitlines() if t.strip()]
-        defects4j.test(work_dir, names, env=env_vars)
+        for name in names:
+            safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+            per_test_env = {"OBJDUMP_OUT": os.path.join(dumps_dir, f"{safe}.jsonl")}
+            defects4j.test(work_dir, [name], env=per_test_env)
     else:
         # Fall back to running the full test suite if no triggering tests are exported
         defects4j.test(work_dir, env=env_vars)

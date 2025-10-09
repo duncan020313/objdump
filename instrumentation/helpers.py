@@ -17,6 +17,7 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
     pkg_dir = os.path.join(work_dir, src_java_rel, "org", "instrument")
     os.makedirs(pkg_dir, exist_ok=True)
 
+    # Deploy DumpObj.java
     dump_obj_path = os.path.join(pkg_dir, "DumpObj.java")
     if not os.path.isfile(dump_obj_path):
         content = _read_java_template("DumpObj.java")
@@ -31,9 +32,11 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
         with open(dump_obj_path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    # Deploy DebugDump.java
     debug_dump_path = os.path.join(pkg_dir, "DebugDump.java")
     content = _read_java_template("DebugDump.java")
     if not content:
+        # Fallback content if template missing
         content = (
             "package org.instrument;\n\n"
             "import com.fasterxml.jackson.databind.ObjectMapper;\n"
@@ -61,5 +64,112 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
         )
     with open(debug_dump_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+    # Deploy DumpWrapper.java
+    dump_wrapper_path = os.path.join(pkg_dir, "DumpWrapper.java")
+    content = _read_java_template("DumpWrapper.java")
+    if not content:
+        # Fallback content if template missing
+        content = (
+            "package org.instrument;\n\n"
+            "import java.lang.reflect.Method;\n"
+            "import java.lang.reflect.Parameter;\n"
+            "import java.util.*;\n"
+            "import java.util.function.Supplier;\n\n"
+            "public final class DumpWrapper {\n"
+            "    private DumpWrapper() {}\n"
+            "    public static <T> T wrap(Object self, String methodName, Object[] params, Supplier<T> method) {\n"
+            "        String id = DebugDump.newInvocationId();\n"
+            "        Map<String, Object> paramMap = extractParameterMap(self, methodName, params);\n"
+            "        DebugDump.writeEntry(self, paramMap, id);\n"
+            "        try {\n"
+            "            T result = method.get();\n"
+            "            DebugDump.writeExit(self, new LinkedHashMap<>(), result, id);\n"
+            "            return result;\n"
+            "        } catch (Exception e) {\n"
+            "            DebugDump.writeExit(self, new LinkedHashMap<>(), null, id);\n"
+            "            throw e;\n"
+            "        }\n"
+            "    }\n"
+            "    public static void wrapVoid(Object self, String methodName, Object[] params, Runnable method) {\n"
+            "        String id = DebugDump.newInvocationId();\n"
+            "        Map<String, Object> paramMap = extractParameterMap(self, methodName, params);\n"
+            "        DebugDump.writeEntry(self, paramMap, id);\n"
+            "        try {\n"
+            "            method.run();\n"
+            "            DebugDump.writeExit(self, new LinkedHashMap<>(), null, id);\n"
+            "        } catch (Exception e) {\n"
+            "            DebugDump.writeExit(self, new LinkedHashMap<>(), null, id);\n"
+            "            throw e;\n"
+            "        }\n"
+            "    }\n"
+            "    private static Map<String, Object> extractParameterMap(Object self, String methodName, Object[] params) {\n"
+            "        Map<String, Object> paramMap = new LinkedHashMap<>();\n"
+            "        if (self == null || params == null || params.length == 0) {\n"
+            "            return paramMap;\n"
+            "        }\n"
+            "        try {\n"
+            "            Class<?> clazz = self.getClass();\n"
+            "            Method[] methods = clazz.getDeclaredMethods();\n"
+            "            Method targetMethod = null;\n"
+            "            for (Method method : methods) {\n"
+            "                if (method.getName().equals(methodName) && method.getParameterCount() == params.length) {\n"
+            "                    targetMethod = method;\n"
+            "                    break;\n"
+            "                }\n"
+            "            }\n"
+            "            if (targetMethod != null) {\n"
+            "                Parameter[] parameters = targetMethod.getParameters();\n"
+            "                for (int i = 0; i < Math.min(parameters.length, params.length); i++) {\n"
+            "                    String paramName = parameters[i].getName();\n"
+            "                    if (paramName == null || paramName.startsWith(\"arg\")) {\n"
+            "                        paramName = \"param\" + i;\n"
+            "                    }\n"
+            "                    paramMap.put(paramName, params[i]);\n"
+            "                }\n"
+            "            } else {\n"
+            "                for (int i = 0; i < params.length; i++) {\n"
+            "                    paramMap.put(\"param\" + i, params[i]);\n"
+            "                }\n"
+            "            }\n"
+            "        } catch (Exception e) {\n"
+            "            for (int i = 0; i < params.length; i++) {\n"
+            "                paramMap.put(\"param\" + i, params[i]);\n"
+            "            }\n"
+            "        }\n"
+            "        return paramMap;\n"
+            "    }\n"
+            "}\n"
+        )
+    with open(dump_wrapper_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    # Deploy Func.java
+    func_path = os.path.join(pkg_dir, "Func.java")
+    if not os.path.isfile(func_path):
+        content = _read_java_template("Func.java")
+        if not content:
+            content = (
+                "package org.instrument;\n\n"
+                "public interface Func<T> {\n"
+                "    T call() throws Exception;\n"
+                "}\n"
+            )
+        with open(func_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    # Deploy VoidFunc.java
+    void_func_path = os.path.join(pkg_dir, "VoidFunc.java")
+    if not os.path.isfile(void_func_path):
+        content = _read_java_template("VoidFunc.java")
+        if not content:
+            content = (
+                "package org.instrument;\n\n"
+                "public interface VoidFunc {\n"
+                "    void call() throws Exception;\n"
+                "}\n"
+            )
+        with open(void_func_path, "w", encoding="utf-8") as f:
+            f.write(content)
 
 

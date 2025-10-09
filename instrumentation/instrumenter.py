@@ -9,9 +9,11 @@ from .ts import method_signature_from_node
 def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[str]:
     if not target_signatures:
         return []
+    
     language = get_language("java")
     parser = Parser()
     parser.set_language(language)
+    
     try:
         with open(java_file, "rb") as f:
             src = f.read()
@@ -23,6 +25,8 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
     stack = [cursor.node]
     method_nodes = []
     matched_sigs: List[str] = []
+    
+    # Find all target methods
     while stack:
         n = stack.pop()
         if n.type in ("method_declaration", "constructor_declaration"):
@@ -32,12 +36,21 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
                 matched_sigs.append(sig)
         for i in range(n.child_count):
             stack.append(n.child(i))
+    
     if not method_nodes:
         return []
 
     text = src.decode("utf-8")
-    import_needed = ["import org.instrument.DumpObj;", "import org.instrument.DebugDump;"]
+    
+    # Add necessary imports (Java 6 compatible)
+    import_needed = [
+        "import org.instrument.DumpObj;", 
+        "import org.instrument.DumpWrapper;",
+        "import org.instrument.Func;",
+        "import org.instrument.VoidFunc;"
+    ]
     missing_imports = [imp for imp in import_needed if imp not in text]
+    
     if missing_imports:
         pkg_idx = text.find("package ")
         insert_pos = 0
@@ -55,6 +68,8 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
     cursor = tree.walk()
     stack = [cursor.node]
     method_nodes = []
+    
+    # Re-find methods after adding imports
     while stack:
         n = stack.pop()
         if n.type in ("method_declaration", "constructor_declaration"):
@@ -64,29 +79,21 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
         for i in range(n.child_count):
             stack.append(n.child(i))
 
+    # Sort by start position (reverse order for safe replacement)
     method_nodes.sort(key=lambda n: n.start_byte, reverse=True)
+    
     new_src = bytearray(src)
-    for n in method_nodes:
-        body = n.child_by_field_name("body")
-        if body is None or body.type != "block":
-            continue
-        is_static = False
-        for i in range(n.child_count):
-            child = n.child(i)
-            if child.type == "modifiers":
-                text_slice = src[child.start_byte:child.end_byte].decode("utf-8")
-                if "static" in text_slice.split():
-                    is_static = True
-                    break
-        body_start = body.start_byte
-        body_end = body.end_byte
-        inner = new_src[body_start:body_end]
-        if not inner or inner[0] != ord('{') or inner[-1] != ord('}'):
-            continue
-        target_expr = b"null" if is_static else b"this"
-        params_node = n.child_by_field_name("parameters")
+    
+    for method_node in method_nodes:
+        # Get method details BEFORE modifying the source
+        method_name_node = method_node.child_by_field_name("name")
+        method_name = src[method_name_node.start_byte:method_name_node.end_byte].decode("utf-8")
+        
+        params_node = method_node.child_by_field_name("parameters")
         params_text = src[params_node.start_byte:params_node.end_byte].decode("utf-8") if params_node else "()"
-        param_names: List[str] = []
+        
+        # Extract parameter names
+        param_names = []
         if params_text and len(params_text) >= 2:
             inside = params_text[1:-1].strip()
             if inside:
@@ -96,15 +103,73 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
                     name = name.replace(")", "").replace("(", "")
                     if name:
                         param_names.append(name)
-        map_init = b"\njava.util.Map params = new java.util.LinkedHashMap();\n"
-        for pn in param_names:
-            map_init += (b"params.put(\"" + pn.encode("utf-8") + b"\", " + pn.encode("utf-8") + b");\n")
-        id_var = b"String dumpId = DebugDump.newInvocationId();\nboolean __dumped = false;\n"
-        entry = id_var + map_init + b"DebugDump.writeEntry(" + target_expr + b", params, dumpId);\ntry "
-        exitf = b" finally { if (!__dumped) { java.util.Map params = new java.util.LinkedHashMap(); DebugDump.writeExit(" + target_expr + b", params, null, dumpId); } }\n"
+        
+        # Check if static method
+        is_static = False
+        for i in range(method_node.child_count):
+            child = method_node.child(i)
+            if child.type == "modifiers":
+                text_slice = src[child.start_byte:child.end_byte].decode("utf-8")
+                if "static" in text_slice.split():
+                    is_static = True
+                    break
+        
+        # Check if constructor
+        is_constructor = (method_node.type == "constructor_declaration")
+        
+        # Get method body
+        body = method_node.child_by_field_name("body")
+        if body is None or body.type not in ("block", "constructor_body"):
+            continue
+            
+        body_start = body.start_byte
+        body_end = body.end_byte
+        inner = src[body_start:body_end]  # Use original src for body content
+        
+        # Add @DumpObj annotation AFTER getting all the details
+        insert_at = method_node.start_byte
+        annotation_added = False
+        if b"@DumpObj" not in new_src[max(0, insert_at - 100):insert_at]:
+            new_src[insert_at:insert_at] = b"\n@DumpObj\n"
+            annotation_added = True
+            # Adjust body positions if annotation was added
+            if annotation_added:
+                body_start += len(b"\n@DumpObj\n")
+                body_end += len(b"\n@DumpObj\n")
+        
+        if not inner or inner[0] != ord('{') or inner[-1] != ord('}'):
+            continue
+        
+        # Before modifying non-constructor methods, normalize throws clause to 'throws Exception'
+        # so that the anonymous wrapper (which throws Exception) doesn't cause unreported exceptions.
+        if not is_constructor:
+            header_start = method_node.start_byte
+            header_end = body_start
+            header_bytes = bytes(new_src[header_start:header_end])
+            # Separate trailing whitespace before '{' to preserve formatting
+            stripped = header_bytes.rstrip()
+            trailing_ws_len = len(header_bytes) - len(stripped)
+            prefix = stripped
+            suffix_ws = header_bytes[len(stripped):]
+            throws_idx = prefix.find(b"throws ")
+            if throws_idx != -1:
+                # Replace existing throws list with 'throws Exception '
+                new_prefix = prefix[:throws_idx] + b"throws Exception "
+                new_header = new_prefix + suffix_ws
+            else:
+                # Insert ' throws Exception' before any trailing whitespace
+                new_header = prefix + b" throws Exception" + suffix_ws
+            if new_header != header_bytes:
+                # Apply header edit and adjust body offsets
+                delta = len(new_header) - len(header_bytes)
+                new_src[header_start:header_end] = new_header
+                body_start += delta
+                body_end += delta
 
-        is_constructor = (n.type == "constructor_declaration")
-        content = inner[1:-1]
+        # Extract original method content
+        content = inner[1:-1]  # Remove { and }
+        
+        # Handle constructors with super()/this() calls
         header_stmt = b""
         rest_content = content
         if is_constructor:
@@ -114,99 +179,72 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
                 if b"super(" in first_stmt or b"this(" in first_stmt:
                     header_stmt = first_stmt + b"\n"
                     rest_content = content[semi_idx + 1:]
-        if header_stmt:
-            new_body = b"{" + header_stmt + entry + b"{" + rest_content + b"}" + exitf + b"}"
+        
+        # Create parameter array
+        param_array = b"new Object[]{" + b", ".join([name.encode("utf-8") for name in param_names]) + b"}" if param_names else b"new Object[]{}"
+        
+        # Determine self expression
+        self_expr = b"null" if is_static else b"this"
+        
+        # Create wrapper call
+        if is_constructor:
+            # For constructors, inject inline try/finally logging after any leading super/this call.
+            # Build parameter map inline to avoid changing throws or using anonymous classes.
+            id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
+            map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
+            # Fill parameter map
+            if param_names:
+                puts = b"".join([
+                    b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
+                    for i, name in enumerate(param_names)
+                ])
+            else:
+                puts = b""
+            entry_call = b"org.instrument.DebugDump.writeEntry(this, __objdump_params, __objdump_id);\n"
+            # Body content after header
+            body_after_header = rest_content if header_stmt else content
+            try_finally = (
+                b"try {\n" + body_after_header + b"\n} finally {\n" +
+                b"org.instrument.DebugDump.writeExit(this, null, null, __objdump_id);\n" +
+                b"}"
+            )
+            injected = id_decl + map_decl + puts + entry_call + try_finally
+            if header_stmt:
+                new_body = b"{" + header_stmt + injected + b"\n}"
+            else:
+                new_body = b"{" + injected + b"\n}"
         else:
-            new_body = b"{" + entry + b"{" + content + b"}" + exitf + b"}"
+            # Check return type
+            return_type_node = method_node.child_by_field_name("type")
+            is_void_method = False
+            
+            if return_type_node is not None:
+                return_type = src[return_type_node.start_byte:return_type_node.end_byte].decode("utf-8")
+                is_void_method = (return_type == "void")
+            
+            if is_void_method:
+                # Void method
+                wrapper_call = (
+                    b"DumpWrapper.wrapVoid(" + self_expr + b", " + 
+                    param_array + b", new VoidFunc() { public void call() throws Exception {\n" + content + b"\n} });"
+                )
+                new_body = b"{" + wrapper_call + b"\n}"
+            else:
+                # Method with return value
+                return_type = src[return_type_node.start_byte:return_type_node.end_byte]
+                wrapper_call = (
+                    b"return DumpWrapper.wrap(" + self_expr + b", " + 
+                    param_array + b", new Func<" + return_type + b">() { public " + return_type + b" call() throws Exception {\n" + content + b"\n} });"
+                )
+                new_body = b"{" + wrapper_call + b"\n}"
+        
+        # Replace method body
         new_src[body_start:body_end] = new_body
 
+    # Write the instrumented file
     with open(java_file, "wb") as f:
         f.write(bytes(new_src))
 
-    src2 = bytes(new_src)
-    tree2 = parser.parse(src2)
-    cursor2 = tree2.walk()
-    stack2 = [cursor2.node]
-    targets2 = []
-    while stack2:
-        n = stack2.pop()
-        if n.type in ("method_declaration", "constructor_declaration"):
-            sig = method_signature_from_node(src2, n)
-            if sig in target_signatures:
-                targets2.append(n)
-        for i in range(n.child_count):
-            stack2.append(n.child(i))
-    targets2.sort(key=lambda n: n.start_byte, reverse=True)
-    new_src2 = bytearray(src2)
-    for n in targets2:
-        insert_at = n.start_byte
-        if b"@DumpObj" in new_src2[max(0, insert_at - 100):insert_at]:
-            continue
-        new_src2[insert_at:insert_at] = b"\n@DumpObj\n"
-
-    with open(java_file, "wb") as f:
-        f.write(bytes(new_src2))
-
-    src3 = bytes(new_src2)
-    tree3 = parser.parse(src3)
-    cursor3 = tree3.walk()
-    stack3 = [cursor3.node]
-    target_methods3 = []
-    while stack3:
-        n = stack3.pop()
-        if n.type in ("method_declaration", "constructor_declaration"):
-            sig = method_signature_from_node(src3, n)
-            if sig in target_signatures:
-                target_methods3.append(n)
-        for i in range(n.child_count):
-            stack3.append(n.child(i))
-    target_methods3.sort(key=lambda n: n.start_byte, reverse=True)
-    new_src3 = bytearray(src3)
-    for mnode in target_methods3:
-        is_static = False
-        for i in range(mnode.child_count):
-            child = mnode.child(i)
-            if child.type == "modifiers":
-                txt = src3[child.start_byte:child.end_byte].decode("utf-8")
-                if "static" in txt.split():
-                    is_static = True
-                    break
-        self_expr = b"null" if is_static else b"this"
-        body = mnode.child_by_field_name("body")
-        if body is None:
-            continue
-        returns = []
-        stackb = [body]
-        while stackb:
-            bn = stackb.pop()
-            if bn.type == "return_statement":
-                returns.append(bn)
-            for i in range(bn.child_count):
-                stackb.append(bn.child(i))
-        returns.sort(key=lambda n: n.start_byte, reverse=True)
-        for r in returns:
-            expr_child = None
-            for i in range(r.child_count):
-                ch = r.child(i)
-                if ch.type not in ("return", ";"):
-                    expr_child = ch
-                    break
-            if expr_child is not None:
-                expr_bytes = new_src3[expr_child.start_byte:expr_child.end_byte]
-                replacement = (
-                    b"{ java.util.Map params = new java.util.LinkedHashMap(); "
-                    b"DebugDump.writeExit(" + self_expr + b", params, (Object)(" + expr_bytes + b"), dumpId); __dumped = true; return " + expr_bytes + b"; }"
-                )
-            else:
-                replacement = (
-                    b"{ java.util.Map params = new java.util.LinkedHashMap(); "
-                    b"DebugDump.writeExit(" + self_expr + b", params, null, dumpId); __dumped = true; return; }"
-                )
-            new_src3[r.start_byte:r.end_byte] = replacement
-
-    with open(java_file, "wb") as f:
-        f.write(bytes(new_src3))
-    # Return the list of method signatures that were instrumented in this file
     return sorted(set(matched_sigs))
 
 
@@ -222,5 +260,3 @@ def instrument_changed_methods(changed_methods: Dict[str, List[str]]) -> Dict[st
             # Keep going on best-effort; caller can log
             continue
     return result
-
-
