@@ -139,7 +139,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
             if all_map:
                 instrumented_map = instrument_changed_methods(all_map)
 
-    # Emit instrumented method paths report (stdout JSON and file)
+    # Emit instrumented method paths report (pretty stdout and JSON file)
     try:
         flat: List[str] = []
         for fpath, sigs in instrumented_map.items():
@@ -149,7 +149,21 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
         if report_file is None:
             report_file = os.path.join(work_dir, "instrumented_methods.json")
         payload = json.dumps(sorted(flat))
-        print(payload)
+        # Pretty stdout for humans; keep JSON in file for tools
+        try:
+            grouped: Dict[str, List[str]] = {}
+            for item in sorted(flat):
+                path, sig = item.split("::", 1)
+                grouped.setdefault(path, []).append(sig)
+            total = sum(len(v) for v in grouped.values())
+            print(f"Fixed methods ({total}):")
+            for path in sorted(grouped.keys()):
+                print(f"- {path}")
+                for sig in grouped[path]:
+                    print(f"  - {sig}")
+        except Exception:
+            # Fallback to raw JSON on stdout if pretty printing fails
+            print(payload)
         os.makedirs(os.path.dirname(report_file), exist_ok=True)
         with open(report_file, "w", encoding="utf-8") as rf:
             rf.write(payload)
@@ -168,12 +182,26 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     tests = defects4j.export(work_dir, "tests.trigger")
     if tests:
         names = [t.strip() for t in tests.splitlines() if t.strip()]
+        # Print triggering test list for visibility
+        try:
+            print(f"Triggering tests ({len(names)}):")
+            for name in names:
+                print(f"- {name}")
+        except Exception:
+            pass
         for name in names:
-            safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
-            per_test_env = {"OBJDUMP_OUT": os.path.join(dumps_dir, f"{safe}.jsonl")}
+            safe = re.sub(r"[^A-Za-z0-9]", "-", name)
+            dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
+            abs_dump_path = os.path.abspath(dump_path)
+            print(f"Running test {name} with dump path {abs_dump_path}")
+            per_test_env = {"OBJDUMP_OUT": abs_dump_path}
             defects4j.test(work_dir, [name], env=per_test_env)
     else:
         # Fall back to running the full test suite if no triggering tests are exported
+        try:
+            print("No triggering tests exported; running full test suite.")
+        except Exception:
+            pass
         defects4j.test(work_dir, env=env_vars)
 
 
