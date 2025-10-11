@@ -1,5 +1,5 @@
 from typing import Dict, List, Tuple
-from . import ts  # for typing-only coupling avoidance
+import instrumentation.ts as ts  # for typing-only coupling avoidance
 from subprocess import run as sprun, PIPE
 
 

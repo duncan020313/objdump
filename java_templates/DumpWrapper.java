@@ -8,7 +8,7 @@ public final class DumpWrapper {
     /**
      * Wrap a method with return value using DumpWrapper
      */
-    public static <T> T wrap(Object self, Object[] params, Func<T> method) throws Exception {
+    public static <T> T wrap(Object self, Object[] params, Func<T> method) {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMap(params);
         
@@ -19,14 +19,19 @@ public final class DumpWrapper {
             return result;
         } catch (Exception e) {
             DebugDump.writeExit(self, null, null, id);
-            throw e;
+            // Re-throw as RuntimeException to avoid changing method signatures
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            } else {
+                throw new RuntimeException(e);
+            }
         }
     }
 
     /**
      * Wrap a void method using DumpWrapper
      */
-    public static void wrapVoid(Object self, Object[] params, VoidFunc method) throws Exception {
+    public static void wrapVoid(Object self, Object[] params, VoidFunc method) {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMap(params);
         
@@ -36,7 +41,12 @@ public final class DumpWrapper {
             DebugDump.writeExit(self, null, null, id);
         } catch (Exception e) {
             DebugDump.writeExit(self, null, null, id);
-            throw e;
+            // Re-throw as RuntimeException to avoid changing method signatures
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            } else {
+                throw new RuntimeException(e);
+            }
         }
     }
 

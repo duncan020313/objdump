@@ -1,7 +1,7 @@
 package org.instrument;
 
 public interface VoidFunc {
-    void call() throws Exception;
+    void call();
 }
 
 

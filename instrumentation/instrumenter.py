@@ -3,7 +3,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
-from .ts import method_signature_from_node
+from instrumentation.ts import method_signature_from_node
 
 
 def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[str]:
@@ -226,15 +226,36 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
                 # Void method
                 wrapper_call = (
                     b"DumpWrapper.wrapVoid(" + self_expr + b", " + 
-                    param_array + b", new VoidFunc() { public void call() throws Exception {\n" + content + b"\n} });"
+                    param_array + b", new VoidFunc() { public void call() {\n" + content + b"\n} });"
                 )
                 new_body = b"{" + wrapper_call + b"\n}"
             else:
                 # Method with return value
-                return_type = src[return_type_node.start_byte:return_type_node.end_byte]
+                return_type_bytes = src[return_type_node.start_byte:return_type_node.end_byte]
+                return_type_str = return_type_bytes.decode("utf-8").strip()
+                
+                # Map primitive types to their boxed equivalents for generics
+                PRIMITIVE_TO_BOXED = {
+                    "boolean": "Boolean",
+                    "byte": "Byte", 
+                    "short": "Short",
+                    "int": "Integer",
+                    "long": "Long",
+                    "float": "Float",
+                    "double": "Double",
+                    "char": "Character"
+                }
+                
+                # Use boxed type for Func<> generic, but keep original for method signature
+                boxed_type = PRIMITIVE_TO_BOXED.get(return_type_str, return_type_str)
+                boxed_type_bytes = boxed_type.encode("utf-8")
+                
+                # Generate wrapper call with boxed type for Func<>
+                # Note: Don't add throws Exception to method signature - let wrapper handle it internally
                 wrapper_call = (
                     b"return DumpWrapper.wrap(" + self_expr + b", " + 
-                    param_array + b", new Func<" + return_type + b">() { public " + return_type + b" call() throws Exception {\n" + content + b"\n} });"
+                    param_array + b", new Func<" + boxed_type_bytes + b">() { public " + 
+                    boxed_type_bytes + b" call() {\n" + content + b"\n} });"
                 )
                 new_body = b"{" + wrapper_call + b"\n}"
         

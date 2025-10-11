@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 import os
 import re
 import logging
@@ -6,17 +6,17 @@ import json
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 
-from .logging_setup import configure_logging
-from .jt_types import BuildSystem
-from . import defects4j
-from .build_systems import detect
-from .build_systems.maven import add_dependencies as add_maven
-from .build_systems.ant import add_dependencies as add_ant
-from .instrumentation.diff import compute_file_diff_ranges_both
-from .instrumentation.ts import extract_changed_methods
-from .instrumentation.instrumenter import instrument_changed_methods
-from .instrumentation.helpers import ensure_helper_sources
-from .objdump_io.net import download_files
+from logging_setup import configure_logging
+from jt_types import BuildSystem
+import defects4j
+from build_systems import detect
+from build_systems.maven import add_dependencies as add_maven
+from build_systems.ant import add_dependencies as add_ant
+from instrumentation.diff import compute_file_diff_ranges_both
+from instrumentation.ts import extract_changed_methods
+from instrumentation.instrumenter import instrument_changed_methods
+from instrumentation.helpers import ensure_helper_sources
+from objdump_io.net import download_files
 
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
@@ -27,6 +27,87 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
         (f"jackson-annotations-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-annotations/{version}/jackson-annotations-{version}.jar"),
     ]
     download_files(lib_dir, items)
+
+
+def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -> bool:
+    """Verify Jackson jars are in project classpath and accessible."""
+    lib_dir = os.path.join(work_dir, "lib")
+    required_jars = [
+        f"jackson-core-{jackson_version}.jar",
+        f"jackson-databind-{jackson_version}.jar", 
+        f"jackson-annotations-{jackson_version}.jar"
+    ]
+    
+    # Check if jars exist
+    for jar in required_jars:
+        jar_path = os.path.join(lib_dir, jar)
+        if not os.path.isfile(jar_path):
+            return False
+    
+    # Check if jars are referenced in build files
+    build_xml = os.path.join(work_dir, "build.xml")
+    pom_xml = os.path.join(work_dir, "pom.xml")
+    
+    if os.path.isfile(build_xml):
+        with open(build_xml, 'r', encoding='utf-8') as f:
+            build_content = f.read()
+            for jar in required_jars:
+                if jar not in build_content:
+                    return False
+    
+    if os.path.isfile(pom_xml):
+        with open(pom_xml, 'r', encoding='utf-8') as f:
+            pom_content = f.read()
+            if "jackson" not in pom_content.lower():
+                return False
+    
+    return True
+
+
+def extract_compilation_errors(work_dir: str) -> str:
+    """Extract compilation errors from build output."""
+    # Look for common error log files
+    error_files = [
+        os.path.join(work_dir, "build.log"),
+        os.path.join(work_dir, "compile.log"),
+        os.path.join(work_dir, "ant.log"),
+        os.path.join(work_dir, "maven.log")
+    ]
+    
+    for error_file in error_files:
+        if os.path.isfile(error_file):
+            try:
+                with open(error_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    # Extract last 50 lines or first 1000 chars of errors
+                    lines = content.split('\n')
+                    if len(lines) > 50:
+                        error_lines = lines[-50:]
+                    else:
+                        error_lines = lines
+                    
+                    error_text = '\n'.join(error_lines)
+                    if len(error_text) > 1000:
+                        error_text = error_text[:1000] + "..."
+                    return error_text
+            except Exception:
+                continue
+    
+    return "No detailed error information available"
+
+
+def detect_java_version(work_dir: str) -> str:
+    """Detect Java version used in the project."""
+    try:
+        import subprocess
+        result = subprocess.run(['java', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            version_line = result.stderr.split('\n')[0]
+            return version_line.strip()
+    except Exception:
+        pass
+    return "Unknown"
 
 
 def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False, report_file: Optional[str] = None) -> None:
@@ -125,7 +206,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
                     cursor = t.walk()
                     stack = [cursor.node]
                     sigs: Set[str] = set()
-                    from .instrumentation.ts import method_signature_from_node
+                    from instrumentation.ts import method_signature_from_node
                     while stack:
                         n = stack.pop()
                         if n.type in ("method_declaration", "constructor_declaration"):
@@ -204,4 +285,231 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
             pass
         defects4j.test(work_dir, env=env_vars)
 
+
+def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False, report_file: Optional[str] = None) -> Dict[str, Any]:
+    """Run the full workflow with stage-wise status reporting.
+
+    Returns a dictionary summarizing each stage outcome and any errors.
+    """
+    configure_logging()
+    log = logging.getLogger("jackson_installer")
+
+    status: Dict[str, Any] = {
+        "project": project_id,
+        "bug_id": int(bug_id) if isinstance(bug_id, str) and bug_id.isdigit() else bug_id,
+        "work_dir": work_dir,
+        "stages": {
+            "checkout": "pending",
+            "jackson": "pending",
+            "compile": "pending",
+            "instrument": "pending",
+            "rebuild": "pending",
+            "tests": {"status": "pending", "triggering": [], "failures": None},
+        },
+        "error": None,
+    }
+
+    try:
+        # Clean work dirs if exist
+        if os.path.exists(work_dir):
+            import shutil
+            shutil.rmtree(work_dir)
+        fixed_dir = f"{work_dir}_fixed"
+        if os.path.exists(fixed_dir):
+            import shutil
+            shutil.rmtree(fixed_dir)
+
+        # Checkout buggy and fixed
+        if not defects4j.checkout(project_id, bug_id, work_dir, "b"):
+            status["stages"]["checkout"] = "fail"
+            status["error"] = "checkout buggy failed"
+            return status
+        if not defects4j.checkout(project_id, bug_id, fixed_dir, "f"):
+            status["stages"]["checkout"] = "fail"
+            status["error"] = "checkout fixed failed"
+            return status
+        status["stages"]["checkout"] = "ok"
+
+        # Detect build system and inject Jackson (POM/build.xml and JARs)
+        try:
+            build_system = detect(work_dir)
+            if build_system == BuildSystem.MAVEN:
+                pom_path = os.path.join(work_dir, "pom.xml")
+                add_maven(pom_path, jackson_version)
+            # For ANT or unknown, try Ant-style injection if build.xml exists
+            build_xml = os.path.join(work_dir, "build.xml")
+            if os.path.isfile(build_xml):
+                add_ant(build_xml, jackson_version)
+            # Always ensure JARs present under lib/ for Ant-driven builds
+            download_jackson_jars(work_dir, jackson_version)
+            
+            # Validate Jackson classpath
+            if not validate_jackson_classpath(work_dir, jackson_version):
+                status["stages"]["jackson"] = "fail"
+                status["error"] = "jackson classpath validation failed"
+                return status
+                
+            status["stages"]["jackson"] = "ok"
+        except Exception as e:
+            status["stages"]["jackson"] = "fail"
+            status["error"] = f"jackson install failed: {e}"
+            return status
+
+        # Ensure helper sources and jars exist before any compile
+        src_java_rel = defects4j.export(work_dir, "dir.src.java") or "src/main/java"
+        ensure_helper_sources(work_dir, src_java_rel)
+        download_jackson_jars(work_dir, jackson_version)
+
+        # Initial compile
+        out_file = os.path.join(work_dir, "dump.jsonl")
+        env_vars = {"OBJDUMP_OUT": out_file}
+        if not defects4j.compile(work_dir, env=env_vars):
+            status["stages"]["compile"] = "fail"
+            error_details = extract_compilation_errors(work_dir)
+            status["error"] = f"compile failed: {error_details}"
+            return status
+        status["stages"]["compile"] = {
+            "status": "ok",
+            "java_version": detect_java_version(work_dir)
+        }
+
+        # Diffs and instrumentation plan
+        classes_dir = defects4j.export(work_dir, "dir.src.classes") or ""
+        modified_classes = (defects4j.export(work_dir, "classes.modified") or "").splitlines()
+        modified_classes = [s for s in (c.strip() for c in modified_classes) if s]
+
+        def to_path(class_path: str, modified: List[str]) -> List[str]:
+            result: List[str] = []
+            for mc in modified:
+                cp = mc.replace(".", "/")
+                result.append(os.path.join(class_path, cp))
+            return result
+
+        modified_class_paths = to_path(classes_dir, modified_classes) if classes_dir and modified_classes else []
+
+        changed: Dict[str, List[str]] = {}
+        for buggy_cp in modified_class_paths:
+            java_buggy = os.path.join(work_dir, buggy_cp + ".java")
+            java_fixed = os.path.join(f"{work_dir}_fixed", buggy_cp + ".java")
+            if not (os.path.isfile(java_buggy) and os.path.isfile(java_fixed)):
+                continue
+            ranges = compute_file_diff_ranges_both(java_buggy, java_fixed)
+            methods = set()
+            if ranges.get("left"):
+                methods.update(extract_changed_methods(java_buggy, ranges["left"]))
+            if ranges.get("right"):
+                methods.update(extract_changed_methods(java_fixed, ranges["right"]))
+            if methods:
+                changed[java_buggy] = sorted(methods)
+
+        instrumented_map: Dict[str, List[str]] = {}
+        try:
+            if changed:
+                instrumented_map = instrument_changed_methods(changed)
+            else:
+                if instrument_all_modified and modified_class_paths:
+                    from tree_sitter import Parser
+                    from tree_sitter_languages import get_language
+                    all_map: Dict[str, List[str]] = {}
+                    for p in modified_class_paths:
+                        jf = os.path.join(work_dir, p + ".java")
+                        if not os.path.isfile(jf):
+                            continue
+                        try:
+                            lang = get_language("java")
+                            parser = Parser()
+                            parser.set_language(lang)
+                            with open(jf, "rb") as f:
+                                s = f.read()
+                            t = parser.parse(s)
+                            cursor = t.walk()
+                            stack = [cursor.node]
+                            sigs: Set[str] = set()
+                            from instrumentation.ts import method_signature_from_node
+                            while stack:
+                                n = stack.pop()
+                                if n.type in ("method_declaration", "constructor_declaration"):
+                                    sigs.add(method_signature_from_node(s, n))
+                                for i in range(n.child_count):
+                                    stack.append(n.child(i))
+                            if sigs:
+                                all_map[jf] = sorted(sigs)
+                        except Exception:
+                            continue
+                    if all_map:
+                        instrumented_map = instrument_changed_methods(all_map)
+            status["stages"]["instrument"] = {
+                "status": "ok",
+                "methods_found": len(changed) if changed else 0,
+                "methods_instrumented": sum(len(sigs) for sigs in instrumented_map.values()) if instrumented_map else 0
+            }
+        except Exception as e:
+            status["stages"]["instrument"] = "fail"
+            status["error"] = f"instrument failed: {e}"
+            return status
+
+        # Report instrumented methods (best-effort)
+        try:
+            flat: List[str] = []
+            for fpath, sigs in instrumented_map.items():
+                abs_path = os.path.abspath(fpath)
+                for sig in sigs:
+                    flat.append(f"{abs_path}::{sig}")
+            if report_file is None:
+                report_file = os.path.join(work_dir, "instrumented_methods.json")
+            payload = json.dumps(sorted(flat))
+            os.makedirs(os.path.dirname(report_file), exist_ok=True)
+            with open(report_file, "w", encoding="utf-8") as rf:
+                rf.write(payload)
+        except Exception:
+            pass
+
+        # Rebuild after instrumentation
+        if not defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
+            status["stages"]["rebuild"] = "fail"
+            error_details = extract_compilation_errors(work_dir)
+            status["error"] = f"rebuild failed: {error_details}"
+            return status
+        status["stages"]["rebuild"] = "ok"
+
+        # Run tests (triggering if available)
+        dumps_dir = os.path.join(work_dir, "dumps")
+        try:
+            os.makedirs(dumps_dir, exist_ok=True)
+        except Exception:
+            pass
+
+        tests = defects4j.export(work_dir, "tests.trigger")
+        if tests:
+            names = [t.strip() for t in tests.splitlines() if t.strip()]
+            status["stages"]["tests"]["triggering"] = names
+            all_ok = True
+            for name in names:
+                safe = re.sub(r"[^A-Za-z0-9]", "-", name)
+                dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
+                abs_dump_path = os.path.abspath(dump_path)
+                if not defects4j.test(work_dir, [name], env={"OBJDUMP_OUT": abs_dump_path}):
+                    all_ok = False
+            status["stages"]["tests"]["status"] = "ok" if all_ok else "fail"
+        else:
+            if defects4j.test(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
+                status["stages"]["tests"]["status"] = "ok"
+            else:
+                status["stages"]["tests"]["status"] = "fail"
+
+        return status
+    except Exception as e:
+        try:
+            log.exception("run_all_staged error")
+        except Exception:
+            pass
+        status["error"] = str(e)
+        # If nothing was set yet, mark the first pending stage as fail
+        for key in ["checkout", "jackson", "compile", "instrument", "rebuild"]:
+            if status["stages"].get(key) == "pending":
+                status["stages"][key] = "fail"
+                break
+        if isinstance(status["stages"].get("tests"), dict) and status["stages"]["tests"].get("status") == "pending":
+            status["stages"]["tests"]["status"] = "skipped"
+        return status
 

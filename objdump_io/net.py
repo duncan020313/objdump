@@ -1,7 +1,7 @@
 from typing import Iterable, Tuple
 from pathlib import Path
-from .fs import ensure_dir, file_size
-from .shell import run
+from objdump_io.fs import ensure_dir, file_size
+from objdump_io.shell import run
 
 
 def download_files(dest_dir: str, items: Iterable[Tuple[str, str]]) -> None:

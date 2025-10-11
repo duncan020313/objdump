@@ -11,6 +11,7 @@ A modular tool to dump object state and method invocations in Defects4J Java pro
 
 ```bash
 python -m objdump.cli all <PROJECT> <BUG_ID> <WORK_DIR> [--jackson-version 2.13.0] [--instrument-all-modified] [--report-file <PATH>]
+python -m objdump.cli matrix [--projects "Chart,Closure,Lang,Math,Mockito,Time"] [--max-bugs-per-project 0] [--workers 4] [--jackson-version 2.13.0] [--instrument-all-modified] [--work-base /tmp/objdump-d4j] [--reports-dir reports]
 ```
 
 - PROJECT: Defects4J project id (e.g., Math, Chart)

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from .objdump_io.shell import run
+from objdump_io.shell import run
 from typing import Dict
 
 
@@ -51,4 +51,28 @@ def export(work_dir: str, prop: str) -> Optional[str]:
         return None
     return res.out.strip() or None
 
+
+
+def list_bug_ids(project_id: str) -> List[int]:
+    """Return all bug ids for a given Defects4J project.
+
+    Note: Defects4J typically treats all listed bugs as activated in the public dataset.
+    This function intentionally does not try to distinguish activated vs. inactive,
+    as doing so reliably would require additional metadata queries. Callers can still
+    cap with --max-bugs-per-project.
+    """
+    res = run(["defects4j", "query", "-p", project_id, "-q", "bug.id"])
+    if res.code != 0:
+        return []
+    ids: List[int] = []
+    for line in (res.out or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ids.append(int(line))
+        except ValueError:
+            # Ignore non-integer lines
+            continue
+    return sorted(ids)
 
