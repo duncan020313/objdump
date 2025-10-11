@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
+import glob
 
 from jt_types import BuildSystem
 
@@ -15,5 +16,43 @@ def detect(project_dir: str) -> Optional[BuildSystem]:
     if (p / "build.xml").is_file():
         return BuildSystem.ANT
     return None
+
+
+def find_all_build_files(project_dir: str) -> List[str]:
+    """Find all build files that might need Jackson dependencies.
+    
+    Scans for:
+    - pom.xml (Maven)
+    - build.xml (Ant)
+    - maven-build.xml (Defects4J Maven wrapper)
+    - *-build.xml patterns (other build variants)
+    - *.build.xml patterns (other build variants)
+    
+    Returns list of absolute paths to build files.
+    """
+    p = Path(project_dir)
+    build_files = []
+    
+    # Standard build files
+    for filename in ['pom.xml', 'build.xml', 'maven-build.xml']:
+        file_path = p / filename
+        if file_path.is_file():
+            build_files.append(str(file_path))
+    
+    # Pattern-based search for other build files (limit depth to 2 levels)
+    patterns = [
+        '*-build.xml',
+        '*.build.xml'
+    ]
+    
+    for pattern in patterns:
+        # Search in project root and one level down
+        for depth in range(2):
+            search_pattern = '/'.join(['*'] * depth + [pattern])
+            matches = glob.glob(str(p / search_pattern))
+            build_files.extend(matches)
+    
+    # Remove duplicates and return
+    return list(set(build_files))
 
 

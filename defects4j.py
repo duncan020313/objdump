@@ -1,6 +1,5 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 from objdump_io.shell import run
-from typing import Dict
 
 
 def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -> bool:
@@ -8,7 +7,8 @@ def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -
     return res.code == 0
 
 
-def compile(work_dir: str, env: Dict[str, str] = None) -> bool:
+def compile(work_dir: str, env: Dict[str, str] = None) -> Tuple[bool, str, str]:
+    """Compile the project and return (success, stdout, stderr)."""
     res = run(["defects4j", "compile"], cwd=work_dir, env=env)
     if res.code != 0:
         print("[defects4j compile] failed")
@@ -16,8 +16,8 @@ def compile(work_dir: str, env: Dict[str, str] = None) -> bool:
             print(res.out)
         if res.err:
             print(res.err)
-        return False
-    return True
+        return False, res.out or "", res.err or ""
+    return True, res.out or "", res.err or ""
 
 
 def test(work_dir: str, tests: Optional[List[str]] = None, env: Dict[str, str] = None) -> bool:

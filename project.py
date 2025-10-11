@@ -363,9 +363,10 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
         # Initial compile
         out_file = os.path.join(work_dir, "dump.jsonl")
         env_vars = {"OBJDUMP_OUT": out_file}
-        if not defects4j.compile(work_dir, env=env_vars):
+        compile_success, compile_out, compile_err = defects4j.compile(work_dir, env=env_vars)
+        if not compile_success:
             status["stages"]["compile"] = "fail"
-            error_details = extract_compilation_errors(work_dir)
+            error_details = f"stdout: {compile_out}\nstderr: {compile_err}" if compile_out or compile_err else "No detailed error information available"
             status["error"] = f"compile failed: {error_details}"
             return status
         status["stages"]["compile"] = {
@@ -465,9 +466,10 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
             pass
 
         # Rebuild after instrumentation
-        if not defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
+        rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")})
+        if not rebuild_success:
             status["stages"]["rebuild"] = "fail"
-            error_details = extract_compilation_errors(work_dir)
+            error_details = f"stdout: {rebuild_out}\nstderr: {rebuild_err}" if rebuild_out or rebuild_err else "No detailed error information available"
             status["error"] = f"rebuild failed: {error_details}"
             return status
         status["stages"]["rebuild"] = "ok"

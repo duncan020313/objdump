@@ -45,9 +45,7 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
     # Add necessary imports (Java 6 compatible)
     import_needed = [
         "import org.instrument.DumpObj;", 
-        "import org.instrument.DumpWrapper;",
-        "import org.instrument.Func;",
-        "import org.instrument.VoidFunc;"
+        "import org.instrument.DebugDump;"
     ]
     missing_imports = [imp for imp in import_needed if imp not in text]
     
@@ -122,9 +120,10 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
         if body is None or body.type not in ("block", "constructor_body"):
             continue
             
-        body_start = body.start_byte
-        body_end = body.end_byte
-        inner = src[body_start:body_end]  # Use original src for body content
+        # Store original body positions before any modifications
+        original_body_start = body.start_byte
+        original_body_end = body.end_byte
+        inner = src[original_body_start:original_body_end]  # Use original src for body content
         
         # Add @DumpObj annotation AFTER getting all the details
         insert_at = method_node.start_byte
@@ -132,39 +131,22 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
         if b"@DumpObj" not in new_src[max(0, insert_at - 100):insert_at]:
             new_src[insert_at:insert_at] = b"\n@DumpObj\n"
             annotation_added = True
-            # Adjust body positions if annotation was added
-            if annotation_added:
-                body_start += len(b"\n@DumpObj\n")
-                body_end += len(b"\n@DumpObj\n")
+        
+        # Calculate adjusted body positions after annotation insertion
+        body_start = original_body_start
+        body_end = original_body_end
+        if annotation_added:
+            body_start += len(b"\n@DumpObj\n")
+            body_end += len(b"\n@DumpObj\n")
         
         if not inner or inner[0] != ord('{') or inner[-1] != ord('}'):
             continue
         
-        # Before modifying non-constructor methods, normalize throws clause to 'throws Exception'
-        # so that the anonymous wrapper (which throws Exception) doesn't cause unreported exceptions.
+        # For non-constructor methods, preserve existing throws clause to avoid signature conflicts
+        # The wrapper methods will handle exceptions internally without changing the method signature
         if not is_constructor:
-            header_start = method_node.start_byte
-            header_end = body_start
-            header_bytes = bytes(new_src[header_start:header_end])
-            # Separate trailing whitespace before '{' to preserve formatting
-            stripped = header_bytes.rstrip()
-            trailing_ws_len = len(header_bytes) - len(stripped)
-            prefix = stripped
-            suffix_ws = header_bytes[len(stripped):]
-            throws_idx = prefix.find(b"throws ")
-            if throws_idx != -1:
-                # Replace existing throws list with 'throws Exception '
-                new_prefix = prefix[:throws_idx] + b"throws Exception "
-                new_header = new_prefix + suffix_ws
-            else:
-                # Insert ' throws Exception' before any trailing whitespace
-                new_header = prefix + b" throws Exception" + suffix_ws
-            if new_header != header_bytes:
-                # Apply header edit and adjust body offsets
-                delta = len(new_header) - len(header_bytes)
-                new_src[header_start:header_end] = new_header
-                body_start += delta
-                body_end += delta
+            # No need to modify throws clause - preserve original method signature
+            pass
 
         # Extract original method content
         content = inner[1:-1]  # Remove { and }
@@ -223,41 +205,48 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
                 is_void_method = (return_type == "void")
             
             if is_void_method:
-                # Void method
-                wrapper_call = (
-                    b"DumpWrapper.wrapVoid(" + self_expr + b", " + 
-                    param_array + b", new VoidFunc() { public void call() {\n" + content + b"\n} });"
+                # Void method - use direct try/finally approach to avoid inner class issues
+                id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
+                map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
+                # Fill parameter map
+                if param_names:
+                    puts = b"".join([
+                        b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
+                        for i, name in enumerate(param_names)
+                    ])
+                else:
+                    puts = b""
+                entry_call = b"org.instrument.DebugDump.writeEntry(" + self_expr + b", __objdump_params, __objdump_id);\n"
+                try_finally = (
+                    b"try {\n" + content + b"\n} finally {\n" +
+                    b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, __objdump_id);\n" +
+                    b"}"
                 )
-                new_body = b"{" + wrapper_call + b"\n}"
+                new_body = b"{" + id_decl + map_decl + puts + entry_call + try_finally + b"\n}"
             else:
-                # Method with return value
+                # Method with return value - preserve original code structure
                 return_type_bytes = src[return_type_node.start_byte:return_type_node.end_byte]
                 return_type_str = return_type_bytes.decode("utf-8").strip()
                 
-                # Map primitive types to their boxed equivalents for generics
-                PRIMITIVE_TO_BOXED = {
-                    "boolean": "Boolean",
-                    "byte": "Byte", 
-                    "short": "Short",
-                    "int": "Integer",
-                    "long": "Long",
-                    "float": "Float",
-                    "double": "Double",
-                    "char": "Character"
-                }
-                
-                # Use boxed type for Func<> generic, but keep original for method signature
-                boxed_type = PRIMITIVE_TO_BOXED.get(return_type_str, return_type_str)
-                boxed_type_bytes = boxed_type.encode("utf-8")
-                
-                # Generate wrapper call with boxed type for Func<>
-                # Note: Don't add throws Exception to method signature - let wrapper handle it internally
-                wrapper_call = (
-                    b"return DumpWrapper.wrap(" + self_expr + b", " + 
-                    param_array + b", new Func<" + boxed_type_bytes + b">() { public " + 
-                    boxed_type_bytes + b" call() {\n" + content + b"\n} });"
+                id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
+                map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
+                # Fill parameter map
+                if param_names:
+                    puts = b"".join([
+                        b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
+                        for i, name in enumerate(param_names)
+                    ])
+                else:
+                    puts = b""
+                entry_call = b"org.instrument.DebugDump.writeEntry(" + self_expr + b", __objdump_params, __objdump_id);\n"
+                try_finally = (
+                    b"try {\n" + 
+                    content + b"\n" +  # Don't add 'return' - preserve original code structure
+                    b"} finally {\n" +
+                    b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, __objdump_id);\n" +
+                    b"}"
                 )
-                new_body = b"{" + wrapper_call + b"\n}"
+                new_body = b"{" + id_decl + map_decl + puts + entry_call + try_finally + b"\n}"
         
         # Replace method body
         new_src[body_start:body_end] = new_body

@@ -141,7 +141,7 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
             content = (
                 "package org.instrument;\n\n"
                 "public interface Func<T> {\n"
-                "    T call() throws Exception;\n"
+                "    T call();\n"
                 "}\n"
             )
         with open(func_path, "w", encoding="utf-8") as f:
@@ -155,7 +155,7 @@ def ensure_helper_sources(work_dir: str, src_java_rel: str) -> None:
             content = (
                 "package org.instrument;\n\n"
                 "public interface VoidFunc {\n"
-                "    void call() throws Exception;\n"
+                "    void call();\n"
                 "}\n"
             )
         with open(void_func_path, "w", encoding="utf-8") as f:

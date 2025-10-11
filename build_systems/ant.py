@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> None:
-    """Inject Jackson jars into Ant build.xml classpaths and properties."""
+    """Inject Jackson jars and instrument classes into Ant build.xml classpaths and properties."""
     p = Path(build_xml_path)
     if not p.is_file():
         raise FileNotFoundError(f"build.xml not found: {build_xml_path}")
@@ -30,6 +30,7 @@ def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> No
     ensure_property('jackson.core.jar', f"lib/jackson-core-{jackson_version}.jar")
     ensure_property('jackson.databind.jar', f"lib/jackson-databind-{jackson_version}.jar")
     ensure_property('jackson.annotations.jar', f"lib/jackson-annotations-{jackson_version}.jar")
+    ensure_property('instrument.src.dir', 'src/main/java/org/instrument')
 
     def ensure_pathelems(path_el: ET.Element):
         existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
@@ -37,10 +38,16 @@ def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> No
             if loc not in existing:
                 ET.SubElement(path_el, 'pathelement', {'location': loc})
 
+    def ensure_srcpath(path_el: ET.Element):
+        existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
+        if '${instrument.src.dir}' not in existing:
+            ET.SubElement(path_el, 'pathelement', {'location': '${instrument.src.dir}'})
+
     for path_tag in root.findall('path'):
         pid = (path_tag.attrib.get('id') or '').lower()
         if any(k in pid for k in ('compile', 'runtime', 'test', 'classpath')):
             ensure_pathelems(path_tag)
+            ensure_srcpath(path_tag)
 
     tree.write(build_xml_path, encoding='utf-8', xml_declaration=True)
 
