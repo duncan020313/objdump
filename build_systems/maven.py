@@ -51,7 +51,7 @@ def add_dependencies(pom_path: str, jackson_version: str = "2.13.0") -> None:
 
 
 def add_dependencies_to_maven_build_xml(maven_build_xml_path: str, jackson_version: str = "2.13.0") -> None:
-    """Add Jackson jars and instrument classes into maven-build.xml classpaths and properties (Ant-style)."""
+    """Add Jackson jars into maven-build.xml classpaths and properties (Ant-style)."""
     p = Path(maven_build_xml_path)
     if not p.is_file():
         raise FileNotFoundError(f"maven-build.xml not found: {maven_build_xml_path}")
@@ -78,7 +78,6 @@ def add_dependencies_to_maven_build_xml(maven_build_xml_path: str, jackson_versi
     ensure_property('jackson.core.jar', f"lib/jackson-core-{jackson_version}.jar")
     ensure_property('jackson.databind.jar', f"lib/jackson-databind-{jackson_version}.jar")
     ensure_property('jackson.annotations.jar', f"lib/jackson-annotations-{jackson_version}.jar")
-    ensure_property('instrument.src.dir', 'src/main/java/org/instrument')
 
     def ensure_pathelems(path_el: ET.Element):
         existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
@@ -86,16 +85,10 @@ def add_dependencies_to_maven_build_xml(maven_build_xml_path: str, jackson_versi
             if loc not in existing:
                 ET.SubElement(path_el, 'pathelement', {'location': loc})
 
-    def ensure_srcpath(path_el: ET.Element):
-        existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
-        if '${instrument.src.dir}' not in existing:
-            ET.SubElement(path_el, 'pathelement', {'location': '${instrument.src.dir}'})
-
     for path_tag in root.findall('path'):
         pid = (path_tag.attrib.get('id') or '').lower()
         if any(k in pid for k in ('compile', 'runtime', 'test', 'classpath')):
             ensure_pathelems(path_tag)
-            ensure_srcpath(path_tag)
 
     tree.write(maven_build_xml_path, encoding='utf-8', xml_declaration=True)
 

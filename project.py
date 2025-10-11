@@ -9,8 +9,8 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
-from build_systems import detect
-from build_systems.maven import add_dependencies as add_maven
+from build_systems import detect, find_all_build_files
+from build_systems.maven import add_dependencies as add_maven, add_dependencies_to_maven_build_xml
 from build_systems.ant import add_dependencies as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
@@ -45,21 +45,32 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
             return False
     
     # Check if jars are referenced in build files
-    build_xml = os.path.join(work_dir, "build.xml")
-    pom_xml = os.path.join(work_dir, "pom.xml")
+    # Find all build files that might contain Jackson references
+    all_build_files = find_all_build_files(work_dir)
     
-    if os.path.isfile(build_xml):
-        with open(build_xml, 'r', encoding='utf-8') as f:
-            build_content = f.read()
-            for jar in required_jars:
-                if jar not in build_content:
-                    return False
-    
-    if os.path.isfile(pom_xml):
-        with open(pom_xml, 'r', encoding='utf-8') as f:
-            pom_content = f.read()
-            if "jackson" not in pom_content.lower():
-                return False
+    # Check each build file for Jackson references
+    for build_file in all_build_files:
+        if os.path.isfile(build_file):
+            try:
+                with open(build_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # For Maven POM files, check for jackson in dependencies
+                    if build_file.endswith('pom.xml'):
+                        if "jackson" not in content.lower():
+                            return False
+                    # For Ant build files (including maven-build.xml), check for jar references
+                    elif build_file.endswith('.xml'):
+                        # Check if any of the required jars are referenced
+                        jar_found = False
+                        for jar in required_jars:
+                            if jar in content:
+                                jar_found = True
+                                break
+                        if not jar_found:
+                            return False
+            except (IOError, UnicodeDecodeError):
+                # If we can't read the file, skip it but don't fail validation
+                continue
     
     return True
 
@@ -336,10 +347,24 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
             if build_system == BuildSystem.MAVEN:
                 pom_path = os.path.join(work_dir, "pom.xml")
                 add_maven(pom_path, jackson_version)
+                # Also check for maven-build.xml in Defects4J projects
+                maven_build_xml = os.path.join(work_dir, "maven-build.xml")
+                if os.path.isfile(maven_build_xml):
+                    add_dependencies_to_maven_build_xml(maven_build_xml, jackson_version)
+            
             # For ANT or unknown, try Ant-style injection if build.xml exists
             build_xml = os.path.join(work_dir, "build.xml")
             if os.path.isfile(build_xml):
                 add_ant(build_xml, jackson_version)
+            
+            # Find and modify all other build files that might need Jackson dependencies
+            all_build_files = find_all_build_files(work_dir)
+            for build_file in all_build_files:
+                if build_file.endswith('maven-build.xml') and os.path.isfile(build_file):
+                    add_dependencies_to_maven_build_xml(build_file, jackson_version)
+                elif build_file.endswith('build.xml') and os.path.isfile(build_file):
+                    add_ant(build_file, jackson_version)
+            
             # Always ensure JARs present under lib/ for Ant-driven builds
             download_jackson_jars(work_dir, jackson_version)
             
