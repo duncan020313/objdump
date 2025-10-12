@@ -82,7 +82,7 @@ def main() -> None:
         # Write additional reports
         from reports import write_summary_statistics, write_detailed_errors
         write_summary_statistics(summary_path, results, args.dumps_dir)
-        write_detailed_errors(errors_path, results)
+        write_detailed_errors(errors_path, results, args.dumps_dir)
 
 
 if __name__ == "__main__":

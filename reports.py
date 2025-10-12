@@ -169,7 +169,7 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_d
         return
     
     # Calculate stage success rates
-    stages = ["checkout", "jackson", "compile", "instrument", "rebuild", "tests"]
+    stages = ["checkout", "jackson", "compile", "instrument", "rebuild", "tests", "dumps"]
     stage_stats = {}
     
     # Calculate dump collection statistics
@@ -187,16 +187,28 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_d
         skip_count = 0
         
         for row in rows:
-            stage_status = row.get("stages", {}).get(stage)
-            if isinstance(stage_status, dict):
-                stage_status = stage_status.get("status", "pending")
-            
-            if stage_status == "ok":
-                success_count += 1
-            elif stage_status == "fail":
-                fail_count += 1
-            elif stage_status == "skipped":
-                skip_count += 1
+            if stage == "dumps":
+                # Special handling for dump collection status
+                project = row.get("project", "Unknown")
+                bug_id = row.get("bug_id", "?")
+                bug_id_str = str(bug_id)
+                dump_status = check_dump_collection_status(project, bug_id_str, dumps_base_dir)
+                
+                if dump_status["status"] == "collected" and dump_status["file_count"] > 0:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            else:
+                stage_status = row.get("stages", {}).get(stage)
+                if isinstance(stage_status, dict):
+                    stage_status = stage_status.get("status", "pending")
+                
+                if stage_status == "ok":
+                    success_count += 1
+                elif stage_status == "fail":
+                    fail_count += 1
+                elif stage_status == "skipped":
+                    skip_count += 1
         
         stage_stats[stage] = {
             "success": success_count,
@@ -232,15 +244,23 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_d
         
         project_stats[project]["total"] += 1
         
-        # Count as success if all stages passed
+        # Count as success if all stages passed AND dumps were collected
         all_passed = True
         for stage in stages:
-            stage_status = row.get("stages", {}).get(stage)
-            if isinstance(stage_status, dict):
-                stage_status = stage_status.get("status", "pending")
-            if stage_status not in ["ok", "skipped"]:
-                all_passed = False
-                break
+            if stage == "dumps":
+                # Check dump collection status
+                bug_id_str = str(row.get("bug_id", "?"))
+                dump_status = check_dump_collection_status(project, bug_id_str, dumps_base_dir)
+                if not (dump_status["status"] == "collected" and dump_status["file_count"] > 0):
+                    all_passed = False
+                    break
+            else:
+                stage_status = row.get("stages", {}).get(stage)
+                if isinstance(stage_status, dict):
+                    stage_status = stage_status.get("status", "pending")
+                if stage_status not in ["ok", "skipped"]:
+                    all_passed = False
+                    break
         
         if all_passed:
             project_stats[project]["success"] += 1
@@ -282,13 +302,13 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_d
         f.write(f"\n**Overall Success Rate:** {overall_success_rate:.1f}% ({total_success}/{total_bugs})\n")
 
 
-def write_detailed_errors(path: str, rows: List[Dict[str, Any]]) -> None:
+def write_detailed_errors(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
     """Write detailed error report to file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
     # Collect all errors by stage
     stage_errors = {}
-    stages = ["checkout", "jackson", "compile", "instrument", "rebuild", "tests"]
+    stages = ["checkout", "jackson", "compile", "instrument", "rebuild", "tests", "dumps"]
     
     for stage in stages:
         stage_errors[stage] = []
@@ -310,16 +330,27 @@ def write_detailed_errors(path: str, rows: List[Dict[str, Any]]) -> None:
         
         stages_data = row.get("stages", {})
         for stage in stages:
-            stage_status = stages_data.get(stage)
-            if isinstance(stage_status, dict):
-                stage_status = stage_status.get("status", "pending")
-            
-            if stage_status == "fail":
-                stage_errors[stage].append({
-                    "project": project,
-                    "bug_id": bug_id,
-                    "error": error or "Stage failed without specific error message"
-                })
+            if stage == "dumps":
+                # Check dump collection status
+                bug_id_str = str(bug_id)
+                dump_status = check_dump_collection_status(project, bug_id_str, dumps_base_dir)
+                if not (dump_status["status"] == "collected" and dump_status["file_count"] > 0):
+                    stage_errors[stage].append({
+                        "project": project,
+                        "bug_id": bug_id,
+                        "error": f"No dumps collected (status: {dump_status['status']}, files: {dump_status['file_count']})"
+                    })
+            else:
+                stage_status = stages_data.get(stage)
+                if isinstance(stage_status, dict):
+                    stage_status = stage_status.get("status", "pending")
+                
+                if stage_status == "fail":
+                    stage_errors[stage].append({
+                        "project": project,
+                        "bug_id": bug_id,
+                        "error": error or "Stage failed without specific error message"
+                    })
     
     # Write report
     with open(path, "w", encoding="utf-8") as f:
