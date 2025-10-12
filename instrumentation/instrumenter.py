@@ -1,9 +1,129 @@
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
 from instrumentation.ts import method_signature_from_node
+
+
+def find_return_statements(method_body_node) -> List[Tuple[int, int, str]]:
+    """Find all return statements in a method body and return their positions and expressions.
+    
+    Returns:
+        List of (start_byte, end_byte, expression) tuples for each return statement
+    """
+    returns = []
+    
+    def traverse(node):
+        if node.type == "return_statement":
+            # Get the full return statement
+            full_start = node.start_byte
+            full_end = node.end_byte
+            
+            # Check if it has an expression (not just 'return;')
+            if node.child_count > 1:  # Has expression
+                expr_node = node.child(1)  # Skip 'return' keyword
+                expr_start = expr_node.start_byte
+                expr_end = expr_node.end_byte
+                returns.append((full_start, full_end, "expr"))
+            else:  # Just 'return;' (void)
+                returns.append((full_start, full_end, "void"))
+        
+        for i in range(node.child_count):
+            traverse(node.child(i))
+    
+    traverse(method_body_node)
+    return returns
+
+
+def transform_returns_with_logging(src: bytes, method_body_node, return_type: str, 
+                                 self_expr: bytes, id_var: str, is_void: bool) -> bytes:
+    """Transform all return statements in a method body to log exit before returning.
+    
+    Args:
+        src: Original source bytes
+        method_body_node: The method body AST node
+        return_type: Return type string (e.g., "int", "String", "void")
+        self_expr: Expression for 'this' (b"this" or b"null")
+        id_var: Variable name for the invocation ID
+        is_void: Whether this is a void method
+    
+    Returns:
+        Transformed method body as bytes
+    """
+    returns = find_return_statements(method_body_node)
+    
+    if not returns:
+        # No explicit returns - add exit log at the end
+        body_content = src[method_body_node.start_byte:method_body_node.end_byte]
+        if is_void:
+            exit_log = b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, " + id_var.encode() + b");\n"
+            return body_content + exit_log
+        else:
+            # Non-void method with no explicit returns - add at end
+            ret_var = b"__objdump_ret"
+            exit_log = return_type.encode('utf-8') + b" " + ret_var + b" = null;\n" + \
+                      b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, (Object)" + ret_var + b", " + id_var.encode() + b");\n" + \
+                      b"return " + ret_var + b";\n"
+            return body_content + exit_log
+    
+    # Sort returns by position (reverse order for safe replacement)
+    returns.sort(key=lambda x: x[0], reverse=True)
+    
+    new_body = bytearray(src[method_body_node.start_byte:method_body_node.end_byte])
+    
+    # For non-void methods, declare the return variable once at the beginning
+    if not is_void and returns:
+        # Use the actual return type instead of Object
+        ret_var_decl = return_type.encode('utf-8') + b" __objdump_ret;\n"
+        new_body = bytearray(ret_var_decl) + new_body
+    
+    for i, (start_byte, end_byte, expr_type) in enumerate(returns):
+        # Convert to relative positions within the method body
+        rel_start = start_byte - method_body_node.start_byte
+        rel_end = end_byte - method_body_node.start_byte
+        
+        # Adjust for the variable declaration we added
+        if not is_void and returns:
+            rel_start += len(ret_var_decl)
+            rel_end += len(ret_var_decl)
+        
+        if expr_type == "void":
+            # void return - just add exit log before return
+            exit_log = b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, " + id_var.encode() + b");\n"
+            new_body[rel_start:rel_end] = exit_log + b"return;"
+        else:
+            # return with expression - extract expression and transform
+            return_content = new_body[rel_start:rel_end].decode('utf-8')
+            # Extract expression part (everything after 'return ')
+            if return_content.startswith('return '):
+                expr_content = return_content[7:].rstrip(';').encode('utf-8')
+            else:
+                expr_content = return_content.encode('utf-8')
+            
+            if return_type == "void":
+                # This shouldn't happen, but handle gracefully
+                exit_log = b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, " + id_var.encode() + b");\n"
+                new_body[rel_start:rel_end] = exit_log + b"return;"
+            else:
+                # Non-void return - assign to existing variable and log
+                exit_log = b"__objdump_ret = (" + expr_content + b");\n" + \
+                          b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, (Object)__objdump_ret, " + id_var.encode() + b");\n" + \
+                          b"return __objdump_ret;"
+                new_body[rel_start:rel_end] = exit_log
+    
+    # For void methods, check if we need to add exit log at the end
+    if is_void and returns:
+        # Check if the method ends with a return statement
+        last_return = max(returns, key=lambda x: x[0])
+        method_end = len(new_body) - 1
+        
+        # If the last return is not at the very end, add exit log
+        if last_return[0] - method_body_node.start_byte < method_end - 10:  # Some tolerance for whitespace
+            exit_log = b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, " + id_var.encode() + b");\n"
+            new_body.extend(exit_log)
+    
+    return bytes(new_body)
 
 
 def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[str]:
@@ -168,85 +288,68 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[s
         # Determine self expression
         self_expr = b"null" if is_static else b"this"
         
-        # Create wrapper call
+        # Create instrumentation with return value capture
+        id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
+        map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
+        
+        # Fill parameter map
+        if param_names:
+            puts = b"".join([
+                b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
+                for i, name in enumerate(param_names)
+            ])
+        else:
+            puts = b""
+        
+        entry_call = b"org.instrument.DebugDump.writeEntry(" + self_expr + b", __objdump_params, __objdump_id);\n"
+        
         if is_constructor:
-            # For constructors, inject inline try/finally logging after any leading super/this call.
-            # Build parameter map inline to avoid changing throws or using anonymous classes.
-            id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
-            map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
-            # Fill parameter map
-            if param_names:
-                puts = b"".join([
-                    b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
-                    for i, name in enumerate(param_names)
-                ])
-            else:
-                puts = b""
-            entry_call = b"org.instrument.DebugDump.writeEntry(this, __objdump_params, __objdump_id);\n"
-            # Body content after header
+            # For constructors, handle super/this calls and transform returns
             body_after_header = rest_content if header_stmt else content
-            try_finally = (
-                b"try {\n" + body_after_header + b"\n} finally {\n" +
-                b"org.instrument.DebugDump.writeExit(this, null, null, __objdump_id);\n" +
-                b"}"
-            )
-            injected = id_decl + map_decl + puts + entry_call + try_finally
+            
+            # Create a temporary body node for return transformation
+            # We need to parse the body content to find return statements
+            temp_src = b"class Temp { void method() {" + body_after_header + b"} }"
+            temp_tree = parser.parse(temp_src)
+            temp_cursor = temp_tree.walk()
+            temp_stack = [temp_cursor.node]
+            temp_body_node = None
+            
+            while temp_stack:
+                n = temp_stack.pop()
+                if n.type == "block":
+                    temp_body_node = n
+                    break
+                for i in range(n.child_count):
+                    temp_stack.append(n.child(i))
+            
+            if temp_body_node:
+                # Transform returns in constructor body
+                transformed_body = transform_returns_with_logging(temp_src, temp_body_node, "void", b"this", "__objdump_id", True)
+                # Remove the class wrapper we added
+                transformed_body = transformed_body[1:-1]  # Remove the { } from method body
+            else:
+                transformed_body = body_after_header
+            
+            injected = id_decl + map_decl + puts + entry_call + transformed_body
             if header_stmt:
                 new_body = b"{" + header_stmt + injected + b"\n}"
             else:
                 new_body = b"{" + injected + b"\n}"
         else:
-            # Check return type
+            # Check return type for regular methods
             return_type_node = method_node.child_by_field_name("type")
             is_void_method = False
+            return_type = "void"
             
             if return_type_node is not None:
-                return_type = src[return_type_node.start_byte:return_type_node.end_byte].decode("utf-8")
+                return_type = src[return_type_node.start_byte:return_type_node.end_byte].decode("utf-8").strip()
                 is_void_method = (return_type == "void")
             
-            if is_void_method:
-                # Void method - use direct try/finally approach to avoid inner class issues
-                id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
-                map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
-                # Fill parameter map
-                if param_names:
-                    puts = b"".join([
-                        b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
-                        for i, name in enumerate(param_names)
-                    ])
-                else:
-                    puts = b""
-                entry_call = b"org.instrument.DebugDump.writeEntry(" + self_expr + b", __objdump_params, __objdump_id);\n"
-                try_finally = (
-                    b"try {\n" + content + b"\n} finally {\n" +
-                    b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, __objdump_id);\n" +
-                    b"}"
-                )
-                new_body = b"{" + id_decl + map_decl + puts + entry_call + try_finally + b"\n}"
-            else:
-                # Method with return value - preserve original code structure
-                return_type_bytes = src[return_type_node.start_byte:return_type_node.end_byte]
-                return_type_str = return_type_bytes.decode("utf-8").strip()
-                
-                id_decl = b"String __objdump_id = org.instrument.DebugDump.newInvocationId();\n"
-                map_decl = b"java.util.Map<String,Object> __objdump_params = new java.util.LinkedHashMap<String,Object>();\n"
-                # Fill parameter map
-                if param_names:
-                    puts = b"".join([
-                        b"__objdump_params.put(\"param" + str(i).encode("utf-8") + b"\", " + name.encode("utf-8") + b");\n"
-                        for i, name in enumerate(param_names)
-                    ])
-                else:
-                    puts = b""
-                entry_call = b"org.instrument.DebugDump.writeEntry(" + self_expr + b", __objdump_params, __objdump_id);\n"
-                try_finally = (
-                    b"try {\n" + 
-                    content + b"\n" +  # Don't add 'return' - preserve original code structure
-                    b"} finally {\n" +
-                    b"org.instrument.DebugDump.writeExit(" + self_expr + b", null, null, __objdump_id);\n" +
-                    b"}"
-                )
-                new_body = b"{" + id_decl + map_decl + puts + entry_call + try_finally + b"\n}"
+            # Transform returns in method body
+            transformed_body = transform_returns_with_logging(src, body, return_type, self_expr, "__objdump_id", is_void_method)
+            
+            new_body = b"{" + id_decl + map_decl + puts + entry_call + transformed_body + b"\n}"
         
         # Replace method body
         new_src[body_start:body_end] = new_body

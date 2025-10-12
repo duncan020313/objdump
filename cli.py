@@ -30,6 +30,7 @@ def main() -> None:
     p_matrix.add_argument("--work-base", default="/tmp/objdump-d4j")
     p_matrix.add_argument("--reports-dir", default="reports")
     p_matrix.add_argument("--reports-basename", default="", help="Base name for report files; default uses timestamp")
+    p_matrix.add_argument("--dumps-dir", default="/tmp/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
 
     args = parser.parse_args()
 
@@ -38,6 +39,10 @@ def main() -> None:
     elif args.cmd == "matrix":
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         os.makedirs(args.reports_dir, exist_ok=True)
+        
+        # Set environment variable for centralized dumps directory
+        os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
+        print(f"Dump files will be collected to: {args.dumps_dir}")
 
         results: List[Dict[str, Any]] = []
 
@@ -67,9 +72,17 @@ def main() -> None:
         base = args.reports_basename.strip() or f"defects4j_matrix_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         jsonl_path = os.path.join(args.reports_dir, f"{base}.jsonl")
         md_path = os.path.join(args.reports_dir, f"{base}.md")
+        summary_path = os.path.join(args.reports_dir, f"{base}_summary.md")
+        errors_path = os.path.join(args.reports_dir, f"{base}_errors.md")
+        
         write_jsonl(jsonl_path, results)
-        write_markdown_table(md_path, results)
-        append_readme_summary("README.md", results)
+        write_markdown_table(md_path, results, args.dumps_dir)
+        append_readme_summary("README.md", results, args.dumps_dir)
+        
+        # Write additional reports
+        from reports import write_summary_statistics, write_detailed_errors
+        write_summary_statistics(summary_path, results, args.dumps_dir)
+        write_detailed_errors(errors_path, results)
 
 
 if __name__ == "__main__":

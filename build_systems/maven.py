@@ -78,6 +78,7 @@ def add_dependencies_to_maven_build_xml(maven_build_xml_path: str, jackson_versi
     ensure_property('jackson.core.jar', f"lib/jackson-core-{jackson_version}.jar")
     ensure_property('jackson.databind.jar', f"lib/jackson-databind-{jackson_version}.jar")
     ensure_property('jackson.annotations.jar', f"lib/jackson-annotations-{jackson_version}.jar")
+    ensure_property('instrument.src.dir', 'src/main/java/org/instrument')
 
     def ensure_pathelems(path_el: ET.Element):
         existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
@@ -85,10 +86,56 @@ def add_dependencies_to_maven_build_xml(maven_build_xml_path: str, jackson_versi
             if loc not in existing:
                 ET.SubElement(path_el, 'pathelement', {'location': loc})
 
+    def ensure_srcpath(path_el: ET.Element):
+        existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
+        if '${instrument.src.dir}' not in existing:
+            ET.SubElement(path_el, 'pathelement', {'location': '${instrument.src.dir}'})
+
+    # Add Jackson dependencies to all path elements
     for path_tag in root.findall('path'):
         pid = (path_tag.attrib.get('id') or '').lower()
         if any(k in pid for k in ('compile', 'runtime', 'test', 'classpath')):
             ensure_pathelems(path_tag)
+            ensure_srcpath(path_tag)
+
+    # Fix encoding and add Jackson to javac tasks
+    for javac in root.findall('.//javac'):
+        # Add encoding="UTF-8" to prevent US-ASCII compilation errors
+        if 'encoding' not in javac.attrib:
+            javac.set('encoding', 'UTF-8')
+        
+        # Add nowarn="true" to suppress compilation warnings
+        if 'nowarn' not in javac.attrib:
+            javac.set('nowarn', 'true')
+        
+        # Check if javac has inline classpath definition
+        classpath = javac.find('classpath')
+        if classpath is not None:
+            # Check if classpath has refid attribute
+            if 'refid' in classpath.attrib:
+                # If it has refid, we need to modify the referenced path instead
+                ref_id = classpath.attrib['refid']
+                for path_tag in root.findall('path'):
+                    if path_tag.get('id') == ref_id:
+                        ensure_pathelems(path_tag)
+                        ensure_srcpath(path_tag)
+                        break
+            else:
+                # No refid, safe to add pathelements directly
+                ensure_pathelems(classpath)
+                ensure_srcpath(classpath)
+        else:
+            # If no inline classpath, try to reference a global path
+            # Look for existing classpath reference
+            classpath_ref = javac.get('classpath')
+            if classpath_ref and classpath_ref.startswith('${') and classpath_ref.endswith('}'):
+                # This references a global path, ensure that path has Jackson
+                path_id = classpath_ref[2:-1]  # Remove ${ and }
+                for path_tag in root.findall('path'):
+                    if path_tag.get('id') == path_id:
+                        ensure_pathelems(path_tag)
+                        ensure_srcpath(path_tag)
+                        break
 
     tree.write(maven_build_xml_path, encoding='utf-8', xml_declaration=True)
 

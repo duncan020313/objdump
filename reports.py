@@ -1,6 +1,69 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
+import glob
 from datetime import datetime
+
+
+def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> Dict[str, Any]:
+    """
+    Check if dump files were collected for a specific project/bug.
+    
+    Args:
+        project_id: Project identifier (e.g., "Math", "Chart")
+        bug_id: Bug identifier (e.g., "1", "2")
+        dumps_base_dir: Base directory where dumps are collected
+        
+    Returns:
+        Dictionary with collection status information
+    """
+    collection_dir = os.path.join(dumps_base_dir, project_id, bug_id)
+    
+    if not os.path.exists(collection_dir):
+        return {
+            "status": "not_found",
+            "collection_dir": collection_dir,
+            "file_count": 0,
+            "files": []
+        }
+    
+    # Find all JSONL files in the collection directory
+    jsonl_pattern = os.path.join(collection_dir, "*.jsonl")
+    jsonl_files = glob.glob(jsonl_pattern)
+    
+    if not jsonl_files:
+        return {
+            "status": "empty",
+            "collection_dir": collection_dir,
+            "file_count": 0,
+            "files": []
+        }
+    
+    # Get file sizes and modification times
+    file_info = []
+    total_size = 0
+    
+    for file_path in jsonl_files:
+        try:
+            stat = os.stat(file_path)
+            file_name = os.path.basename(file_path)
+            file_size = stat.st_size
+            total_size += file_size
+            
+            file_info.append({
+                "name": file_name,
+                "size": file_size,
+                "modified": stat.st_mtime
+            })
+        except OSError:
+            continue
+    
+    return {
+        "status": "collected",
+        "collection_dir": collection_dir,
+        "file_count": len(file_info),
+        "total_size": total_size,
+        "files": file_info
+    }
 
 
 def write_jsonl(path: str, rows: List[Dict[str, Any]]) -> None:
@@ -24,38 +87,62 @@ def _stage_cell(stages: Dict[str, Any], key: str) -> str:
     return "–"
 
 
-def write_markdown_table(path: str, rows: List[Dict[str, Any]]) -> None:
+def _dump_collection_cell(project_id: str, bug_id: str, dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> str:
+    """Get dump collection status cell for markdown table."""
+    # Ensure bug_id is a string for os.path.join
+    bug_id_str = str(bug_id)
+    status_info = check_dump_collection_status(project_id, bug_id_str, dumps_base_dir)
+    
+    if status_info["status"] == "collected":
+        file_count = status_info["file_count"]
+        if file_count > 0:
+            return f"📁 {file_count}"
+        else:
+            return "📁 0"
+    elif status_info["status"] == "empty":
+        return "📁 0"
+    else:  # not_found
+        return "❌"
+
+
+def write_markdown_table(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
-        "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests |\n"
-        "|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|\n"
+        "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests | Dumps |\n"
+        "|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|:-----:|\n"
     )
     lines: List[str] = [header]
     for r in sorted(rows, key=lambda x: (str(x.get("project")), int(x.get("bug_id", 0)) if str(x.get("bug_id", "0")).isdigit() else 0)):
         stages = r.get("stages", {})
+        project = r.get('project', '?')
+        bug_id = r.get('bug_id', '?')
+        dump_cell = _dump_collection_cell(project, bug_id, dumps_base_dir)
         line = (
-            f"| {r.get('project','?')} | {r.get('bug_id','?')} | "
-            f"{_stage_cell(stages,'checkout')} | {_stage_cell(stages,'jackson')} | {_stage_cell(stages,'compile')} | {_stage_cell(stages,'instrument')} | {_stage_cell(stages,'rebuild')} | {_stage_cell(stages,'tests')} |\n"
+            f"| {project} | {bug_id} | "
+            f"{_stage_cell(stages,'checkout')} | {_stage_cell(stages,'jackson')} | {_stage_cell(stages,'compile')} | {_stage_cell(stages,'instrument')} | {_stage_cell(stages,'rebuild')} | {_stage_cell(stages,'tests')} | {dump_cell} |\n"
         )
         lines.append(line)
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
 
 
-def append_readme_summary(readme_path: str, rows: List[Dict[str, Any]]) -> None:
+def append_readme_summary(readme_path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     intro = f"\n\n### Defects4J Activated Bugs Matrix (latest run: {timestamp})\n\n"
     table_lines: List[str] = []
     header = (
-        "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests |\n"
-        "|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|\n"
+        "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests | Dumps |\n"
+        "|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|:-----:|\n"
     )
     table_lines.append(header)
     for r in sorted(rows, key=lambda x: (str(x.get("project")), int(x.get("bug_id", 0)) if str(x.get("bug_id", "0")).isdigit() else 0))[:50]:
         stages = r.get("stages", {})
+        project = r.get('project', '?')
+        bug_id = r.get('bug_id', '?')
+        dump_cell = _dump_collection_cell(project, bug_id, dumps_base_dir)
         line = (
-            f"| {r.get('project','?')} | {r.get('bug_id','?')} | "
-            f"{_stage_cell(stages,'checkout')} | {_stage_cell(stages,'jackson')} | {_stage_cell(stages,'compile')} | {_stage_cell(stages,'instrument')} | {_stage_cell(stages,'rebuild')} | {_stage_cell(stages,'tests')} |\n"
+            f"| {project} | {bug_id} | "
+            f"{_stage_cell(stages,'checkout')} | {_stage_cell(stages,'jackson')} | {_stage_cell(stages,'compile')} | {_stage_cell(stages,'instrument')} | {_stage_cell(stages,'rebuild')} | {_stage_cell(stages,'tests')} | {dump_cell} |\n"
         )
         table_lines.append(line)
 
@@ -71,7 +158,7 @@ def append_readme_summary(readme_path: str, rows: List[Dict[str, Any]]) -> None:
             f.writelines(table_lines)
 
 
-def write_summary_statistics(path: str, rows: List[Dict[str, Any]]) -> None:
+def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
     """Write summary statistics report to file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
@@ -84,6 +171,15 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]]) -> None:
     # Calculate stage success rates
     stages = ["checkout", "jackson", "compile", "instrument", "rebuild", "tests"]
     stage_stats = {}
+    
+    # Calculate dump collection statistics
+    dump_stats = {
+        "collected": 0,
+        "empty": 0,
+        "not_found": 0,
+        "total_files": 0,
+        "total_size": 0
+    }
     
     for stage in stages:
         success_count = 0
@@ -109,6 +205,23 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]]) -> None:
             "total": total_bugs,
             "success_rate": (success_count / total_bugs) * 100 if total_bugs > 0 else 0
         }
+    
+    # Calculate dump collection statistics for each bug
+    for row in rows:
+        project = row.get("project", "Unknown")
+        bug_id = row.get("bug_id", "?")
+        # Ensure bug_id is a string for os.path.join
+        bug_id_str = str(bug_id)
+        dump_status = check_dump_collection_status(project, bug_id_str, dumps_base_dir)
+        
+        if dump_status["status"] == "collected":
+            dump_stats["collected"] += 1
+            dump_stats["total_files"] += dump_status["file_count"]
+            dump_stats["total_size"] += dump_status["total_size"]
+        elif dump_status["status"] == "empty":
+            dump_stats["empty"] += 1
+        else:  # not_found
+            dump_stats["not_found"] += 1
     
     # Calculate per-project statistics
     project_stats = {}
@@ -147,7 +260,15 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]]) -> None:
             stats = stage_stats[stage]
             f.write(f"| {stage.capitalize()} | {stats['success']} | {stats['fail']} | {stats['skip']} | {stats['success_rate']:.1f}% |\n")
         
-        f.write("\n## Per-Project Statistics\n\n")
+        f.write("\n## Dump Collection Statistics\n\n")
+        f.write(f"**Collected:** {dump_stats['collected']} bugs\n")
+        f.write(f"**Empty:** {dump_stats['empty']} bugs\n")
+        f.write(f"**Not Found:** {dump_stats['not_found']} bugs\n")
+        f.write(f"**Total Files:** {dump_stats['total_files']}\n")
+        f.write(f"**Total Size:** {dump_stats['total_size']:,} bytes ({dump_stats['total_size'] / 1024 / 1024:.2f} MB)\n")
+        f.write(f"**Collection Rate:** {(dump_stats['collected'] / total_bugs) * 100:.1f}%\n\n")
+        
+        f.write("## Per-Project Statistics\n\n")
         f.write("| Project | Total | Success | Fail | Success Rate |\n")
         f.write("|---------|-------|---------|------|-------------:|\n")
         

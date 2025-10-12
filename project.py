@@ -9,7 +9,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
-from build_systems import detect, find_all_build_files
+from build_systems import detect, find_all_build_files, fix_encoding_in_build_files, inject_jackson_into_all_build_files
 from build_systems.maven import add_dependencies as add_maven, add_dependencies_to_maven_build_xml
 from build_systems.ant import add_dependencies as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
@@ -17,6 +17,7 @@ from instrumentation.ts import extract_changed_methods
 from instrumentation.instrumenter import instrument_changed_methods
 from instrumentation.helpers import ensure_helper_sources
 from objdump_io.net import download_files
+from collector import collect_dumps_safe
 
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
@@ -42,6 +43,7 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
     for jar in required_jars:
         jar_path = os.path.join(lib_dir, jar)
         if not os.path.isfile(jar_path):
+            print(f"Missing JAR: {jar_path}")
             return False
     
     # Check if jars are referenced in build files
@@ -57,6 +59,7 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
                     # For Maven POM files, check for jackson in dependencies
                     if build_file.endswith('pom.xml'):
                         if "jackson" not in content.lower():
+                            print(f"Missing Jackson in POM: {build_file}")
                             return False
                     # For Ant build files (including maven-build.xml), check for jar references
                     elif build_file.endswith('.xml'):
@@ -67,10 +70,29 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
                                 jar_found = True
                                 break
                         if not jar_found:
+                            print(f"Missing Jackson JARs in build file: {build_file}")
                             return False
             except (IOError, UnicodeDecodeError):
                 # If we can't read the file, skip it but don't fail validation
+                print(f"Warning: Could not read build file: {build_file}")
                 continue
+    
+    # Special check for defects4j.build.xml which is critical
+    defects4j_build = os.path.join(work_dir, "defects4j.build.xml")
+    if os.path.isfile(defects4j_build):
+        try:
+            with open(defects4j_build, 'r', encoding='utf-8') as f:
+                content = f.read()
+                jar_found = False
+                for jar in required_jars:
+                    if jar in content:
+                        jar_found = True
+                        break
+                if not jar_found:
+                    print(f"Missing Jackson JARs in defects4j.build.xml: {defects4j_build}")
+                    return False
+        except (IOError, UnicodeDecodeError):
+            print(f"Warning: Could not read defects4j.build.xml: {defects4j_build}")
     
     return True
 
@@ -150,18 +172,31 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     elif build_system == BuildSystem.ANT:
         log.info("Detected Ant build system")
     else:
-        raise RuntimeError("Unknown build system")
+        log.info("Unknown build system, trying Ant-style injection")
+    
     # Defects4J uses Ant under the hood; ensure Ant build has Jackson jars regardless
     build_xml = os.path.join(work_dir, "build.xml")
     if os.path.isfile(build_xml):
         add_ant(build_xml, jackson_version)
+    
+    # Find and modify all other build files that might need Jackson dependencies
+    inject_jackson_into_all_build_files(work_dir, jackson_version)
+
+    # Always ensure JARs present under lib/ for Ant-driven builds
+    log.info("Downloading Jackson JAR files")
+    download_jackson_jars(work_dir, jackson_version)
+
+    # Get source directory for helper sources
+    classes_dir = defects4j.export(work_dir, "dir.src.classes") or ""
+    
+    # Ensure helper sources are available
+    log.info("Ensuring helper sources")
+    ensure_helper_sources(work_dir, classes_dir or "src/main/java")
 
     # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
     out_file = os.path.join(work_dir, "dump.jsonl")
     env_vars = {"OBJDUMP_OUT": out_file}
     defects4j.compile(work_dir, env=env_vars)
-
-    classes_dir = defects4j.export(work_dir, "dir.src.classes") or ""
     modified_classes = (defects4j.export(work_dir, "classes.modified") or "").splitlines()
     modified_classes = [s for s in (c.strip() for c in modified_classes) if s]
 
@@ -296,6 +331,18 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
             pass
         defects4j.test(work_dir, env=env_vars)
 
+    # Collect dump files after test execution
+    try:
+        # Use centralized location from environment variable or default
+        output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
+        collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
+        if collection_dir:
+            print(f"Collected dump files to: {collection_dir}")
+        else:
+            print("Warning: Failed to collect dump files")
+    except Exception as e:
+        print(f"Warning: Error during dump collection: {e}")
+
 
 def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False, report_file: Optional[str] = None) -> Dict[str, Any]:
     """Run the full workflow with stage-wise status reporting.
@@ -368,6 +415,9 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
             # Always ensure JARs present under lib/ for Ant-driven builds
             download_jackson_jars(work_dir, jackson_version)
             
+            # Fix encoding issues in all build files
+            fix_encoding_in_build_files(work_dir)
+            
             # Validate Jackson classpath
             if not validate_jackson_classpath(work_dir, jackson_version):
                 status["stages"]["jackson"] = "fail"
@@ -381,7 +431,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
             return status
 
         # Ensure helper sources and jars exist before any compile
-        src_java_rel = defects4j.export(work_dir, "dir.src.java") or "src/main/java"
+        src_java_rel = defects4j.export(work_dir, "dir.src.classes") or "src/main/java"
         ensure_helper_sources(work_dir, src_java_rel)
         download_jackson_jars(work_dir, jackson_version)
 
@@ -398,6 +448,16 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
             "status": "ok",
             "java_version": detect_java_version(work_dir)
         }
+
+        # Post-compile Jackson re-injection for newly generated build files
+        # Defects4J may generate defects4j.build.xml after initial compile
+        try:
+            inject_jackson_into_all_build_files(work_dir, jackson_version)
+            # Re-validate Jackson classpath after re-injection
+            if not validate_jackson_classpath(work_dir, jackson_version):
+                print("Warning: Jackson classpath validation failed after re-injection")
+        except Exception as e:
+            print(f"Warning: Post-compile Jackson re-injection failed: {e}")
 
         # Diffs and instrumentation plan
         classes_dir = defects4j.export(work_dir, "dir.src.classes") or ""
@@ -523,6 +583,18 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
                 status["stages"]["tests"]["status"] = "ok"
             else:
                 status["stages"]["tests"]["status"] = "fail"
+
+        # Collect dump files after test execution
+        try:
+            # Use centralized location from environment variable or default
+            output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
+            collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
+            if collection_dir:
+                status["stages"]["collect_dumps"] = {"status": "ok", "collection_dir": collection_dir}
+            else:
+                status["stages"]["collect_dumps"] = {"status": "fail", "error": "Collection failed"}
+        except Exception as e:
+            status["stages"]["collect_dumps"] = {"status": "fail", "error": str(e)}
 
         return status
     except Exception as e:

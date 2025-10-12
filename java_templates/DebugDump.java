@@ -1,11 +1,22 @@
 package org.instrument;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
+import com.fasterxml.jackson.databind.introspect.AnnotatedMethod;
+import com.fasterxml.jackson.databind.introspect.VisibilityChecker;
 import java.io.*;
 import java.util.*;
 
 public final class DebugDump {
-  private static final ObjectMapper M = new ObjectMapper();
+    private static final ObjectMapper M = new ObjectMapper()
+    .disable(MapperFeature.USE_ANNOTATIONS)
+    .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
+    .setVisibility(VisibilityChecker.Std.defaultInstance()
+      .withGetterVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE)
+      .withFieldVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY));
+
 
   private DebugDump() {}
 
