@@ -1,8 +1,11 @@
 import argparse
 import os
-import json
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from instrumentation.post_processor import post_process_dump_files
 from typing import List, Dict, Any
+from reports import write_jsonl, write_markdown_table, append_readme_summary
+
 
 from project import run_all, run_all_staged
 import defects4j
@@ -52,7 +55,7 @@ def main() -> None:
 
         def job(proj: str, bug_id: int) -> Dict[str, Any]:
             work_dir = os.path.join(args.work_base, f"{proj.lower()}-{bug_id}")
-            return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version, args.instrument_all_modified)
+            return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version)
 
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
             futures = []
@@ -69,9 +72,6 @@ def main() -> None:
                     res = {"project": "?", "bug_id": "?", "stages": {}, "error": str(e)}
                 results.append(res)
 
-        # Write JSONL and Markdown table
-        from datetime import datetime
-        from reports import write_jsonl, write_markdown_table, append_readme_summary
 
         base = args.reports_basename.strip() or f"defects4j_matrix_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         jsonl_path = os.path.join(args.reports_dir, f"{base}.jsonl")
@@ -89,7 +89,6 @@ def main() -> None:
         write_detailed_errors(errors_path, results, args.dumps_dir)
     
     elif args.cmd == "postprocess":
-        from instrumentation.post_processor import post_process_dump_files
         
         if not os.path.exists(args.dump_dir):
             print(f"Error: Directory {args.dump_dir} does not exist")

@@ -207,6 +207,7 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     """
     configure_logging()
     log = logging.getLogger("jackson_installer")
+
     
     if os.path.exists(work_dir):
         log.info("Removing existing work dir: %s", work_dir)
@@ -452,13 +453,12 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     collect_dump_files(work_dir, project_id, bug_id)
 
 
-def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", instrument_all_modified: bool = False, report_file: Optional[str] = None) -> Dict[str, Any]:
+def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None) -> Dict[str, Any]:
     """Run the full workflow with stage-wise status reporting using step functions.
 
     Returns a dictionary summarizing each stage outcome and any errors.
     """
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+
 
     status: Dict[str, Any] = {
         "project": project_id,
@@ -475,107 +475,93 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
         "error": None,
     }
 
+
+    # Step 1: Checkout buggy and fixed versions
+    _, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
+    status["stages"]["checkout"] = "ok"
+    
+    # Step 2: Setup Jackson dependencies
+    setup_jackson_dependencies(work_dir, jackson_version)
+    status["stages"]["jackson"] = "ok"
+    
+    # Step 3: Compile project
+    if not compile_project(work_dir):
+        status["stages"]["compile"] = "fail"
+        status["error"] = "Initial compilation failed"
+        return status
+    status["stages"]["compile"] = {
+        "status": "ok",
+        "java_version": detect_java_version(work_dir)
+    }
+    
+    # Post-compile Jackson re-injection for newly generated build files
     try:
-        # Step 1: Checkout buggy and fixed versions
-        buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
-        status["stages"]["checkout"] = "ok"
-        
-        # Step 2: Setup Jackson dependencies
-        setup_jackson_dependencies(work_dir, jackson_version)
-        status["stages"]["jackson"] = "ok"
-        
-        # Step 3: Compile project
-        if not compile_project(work_dir):
-            status["stages"]["compile"] = "fail"
-            status["error"] = "Initial compilation failed"
-            return status
-        status["stages"]["compile"] = {
-            "status": "ok",
-            "java_version": detect_java_version(work_dir)
-        }
-        
-        # Post-compile Jackson re-injection for newly generated build files
-        try:
-            inject_jackson_into_all_build_files(work_dir, jackson_version)
-            # Re-validate Jackson classpath after re-injection
-            if not validate_jackson_classpath(work_dir, jackson_version):
-                print("Warning: Jackson classpath validation failed after re-injection")
-        except Exception as e:
-            print(f"Warning: Post-compile Jackson re-injection failed: {e}")
-
-        # Step 4: Instrument changed methods
-        instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir, instrument_all_modified)
-        status["stages"]["instrument"] = {
-            "status": "ok",
-            "methods_found": len([k for k, v in instrumented_map.items() if v]) if instrumented_map else 0,
-            "methods_instrumented": sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
-        }
-        
-        # Generate instrumentation report (best-effort)
-        try:
-            generate_instrumentation_report(instrumented_map, work_dir, report_file)
-        except Exception:
-            pass
-
-        # Step 5: Rebuild after instrumentation
-        rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")})
-        if not rebuild_success:
-            status["stages"]["rebuild"] = "fail"
-            error_details = f"stdout: {rebuild_out}\nstderr: {rebuild_err}" if rebuild_out or rebuild_err else "No detailed error information available"
-            status["error"] = f"rebuild failed: {error_details}"
-            return status
-        status["stages"]["rebuild"] = "ok"
-
-        # Step 6: Run tests (triggering if available)
-        dumps_dir = os.path.join(work_dir, "dumps")
-        try:
-            os.makedirs(dumps_dir, exist_ok=True)
-        except Exception:
-            pass
-
-        tests = defects4j.export(work_dir, "tests.trigger")
-        if tests:
-            names = [t.strip() for t in tests.splitlines() if t.strip()]
-            status["stages"]["tests"]["triggering"] = names
-            all_ok = True
-            for name in names:
-                safe = re.sub(r"[^A-Za-z0-9]", "-", name)
-                dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
-                abs_dump_path = os.path.abspath(dump_path)
-                if not defects4j.test(work_dir, [name], env={"OBJDUMP_OUT": abs_dump_path}):
-                    all_ok = False
-            status["stages"]["tests"]["status"] = "ok" if all_ok else "fail"
-        else:
-            if defects4j.test(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
-                status["stages"]["tests"]["status"] = "ok"
-            else:
-                status["stages"]["tests"]["status"] = "fail"
-
-        # Step 7: Collect dump files after test execution
-        try:
-            # Use centralized location from environment variable or default
-            output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
-            collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
-            if collection_dir:
-                status["stages"]["collect_dumps"] = {"status": "ok", "collection_dir": collection_dir}
-            else:
-                status["stages"]["collect_dumps"] = {"status": "fail", "error": "Collection failed"}
-        except Exception as e:
-            status["stages"]["collect_dumps"] = {"status": "fail", "error": str(e)}
-
-        return status
+        inject_jackson_into_all_build_files(work_dir, jackson_version)
+        # Re-validate Jackson classpath after re-injection
+        if not validate_jackson_classpath(work_dir, jackson_version):
+            print("Warning: Jackson classpath validation failed after re-injection")
     except Exception as e:
-        try:
-            log.exception("run_all_staged error")
-        except Exception:
-            pass
-        status["error"] = str(e)
-        # If nothing was set yet, mark the first pending stage as fail
-        for key in ["checkout", "jackson", "compile", "instrument", "rebuild"]:
-            if status["stages"].get(key) == "pending":
-                status["stages"][key] = "fail"
-                break
-        if isinstance(status["stages"].get("tests"), dict) and status["stages"]["tests"].get("status") == "pending":
-            status["stages"]["tests"]["status"] = "skipped"
+        print(f"Warning: Post-compile Jackson re-injection failed: {e}")
+
+    # Step 4: Instrument changed methods
+    instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir, instrument_all_modified)
+    status["stages"]["instrument"] = {
+        "status": "ok",
+        "methods_found": len([k for k, v in instrumented_map.items() if v]) if instrumented_map else 0,
+        "methods_instrumented": sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
+    }
+    
+    # Generate instrumentation report (best-effort)
+    try:
+        generate_instrumentation_report(instrumented_map, work_dir, report_file)
+    except Exception:
+        pass
+
+    # Step 5: Rebuild after instrumentation
+    rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")})
+    if not rebuild_success:
+        status["stages"]["rebuild"] = "fail"
+        error_details = f"stdout: {rebuild_out}\nstderr: {rebuild_err}" if rebuild_out or rebuild_err else "No detailed error information available"
+        status["error"] = f"rebuild failed: {error_details}"
         return status
+    status["stages"]["rebuild"] = "ok"
+
+    # Step 6: Run tests (triggering if available)
+    dumps_dir = os.path.join(work_dir, "dumps")
+    try:
+        os.makedirs(dumps_dir, exist_ok=True)
+    except Exception:
+        pass
+
+    tests = defects4j.export(work_dir, "tests.trigger")
+    if tests:
+        names = [t.strip() for t in tests.splitlines() if t.strip()]
+        status["stages"]["tests"]["triggering"] = names
+        all_ok = True
+        for name in names:
+            safe = re.sub(r"[^A-Za-z0-9]", "-", name)
+            dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
+            abs_dump_path = os.path.abspath(dump_path)
+            if not defects4j.test(work_dir, [name], env={"OBJDUMP_OUT": abs_dump_path}):
+                all_ok = False
+        status["stages"]["tests"]["status"] = "ok" if all_ok else "fail"
+    else:
+        if defects4j.test(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
+            status["stages"]["tests"]["status"] = "ok"
+        else:
+            status["stages"]["tests"]["status"] = "fail"
+
+    # Step 7: Collect dump files after test execution
+    try:
+        # Use centralized location from environment variable or default
+        output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
+        collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
+        if collection_dir:
+            status["stages"]["collect_dumps"] = {"status": "ok", "collection_dir": collection_dir}
+        else:
+            status["stages"]["collect_dumps"] = {"status": "fail", "error": "Collection failed"}
+    except Exception as e:
+        status["stages"]["collect_dumps"] = {"status": "fail", "error": str(e)}
+
+    return status
 
