@@ -114,21 +114,3 @@ def compute_file_diff_ranges_both(buggy_file: str, fixed_file: str) -> Dict[str,
     if proc.returncode == 0:
         return {"left": [], "right": []}
     return parse_unified_diff_hunks_both(proc.stdout)
-
-
-def extract_changed_methods_from_fixed_file(fixed_file: str, right_ranges: List[Tuple[int, int]]) -> List[str]:
-    """Extract method signatures from fixed file for addition-only changes."""
-    if not os.path.isfile(fixed_file):
-        print(f"Warning: Fixed file not found: {fixed_file}")
-        return []
-    
-    try:
-        methods = ts.extract_changed_methods(fixed_file, right_ranges)
-        if not methods:
-            print(f"Warning: No changed methods found in {fixed_file} for the given diff ranges")
-        return methods
-    except Exception as e:
-        print(f"Error extracting methods from {fixed_file}: {e}")
-        return []
-
-

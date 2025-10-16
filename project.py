@@ -272,7 +272,7 @@ def compile_project(work_dir: str) -> bool:
     return success
 
 
-def instrument_changed_methods_step(work_dir: str, fixed_dir: str, instrument_all_modified: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, List[Dict[str, Any]]]:
     """Instrument changed methods in the project."""
     configure_logging()
     log = logging.getLogger("jackson_installer")
@@ -466,7 +466,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
         print(f"Warning: Post-compile Jackson re-injection failed: {e}")
 
     # Step 4: Instrument changed methods
-    instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir, instrument_all_modified)
+    instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir)
     status["stages"]["instrument"] = {
         "status": "ok",
         "methods_found": len([k for k, v in instrumented_map.items() if v]) if instrumented_map else 0,
@@ -474,10 +474,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     }
     
     # Generate instrumentation report (best-effort)
-    try:
-        generate_instrumentation_report(instrumented_map, work_dir, report_file)
-    except Exception:
-        pass
+    generate_instrumentation_report(instrumented_map, work_dir, report_file)
 
     # Step 5: Rebuild after instrumentation
     rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")})
