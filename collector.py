@@ -3,11 +3,13 @@ import shutil
 import logging
 from pathlib import Path
 from typing import List, Optional
+from instrumentation.post_processor import post_process_dump_files
 
 
 def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str) -> str:
     """
     Collect all JSONL dump files from the dumps directory and organize them by project/bug ID.
+    Also copies instrumented methods JSON file if it exists.
     
     Args:
         work_dir: Working directory containing the dumps subdirectory
@@ -48,10 +50,6 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str)
     except OSError as e:
         raise OSError(f"Failed to list files in dumps directory {dumps_dir}: {e}")
     
-    if not jsonl_files:
-        log.warning(f"No JSONL files found in {dumps_dir}")
-        return collection_dir
-    
     # Copy each JSONL file to collection directory
     copied_files = []
     for filename in jsonl_files:
@@ -66,7 +64,35 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str)
             log.error(f"Failed to copy {filename}: {e}")
             # Continue with other files even if one fails
     
-    log.info(f"Collected {len(copied_files)} dump files to {collection_dir}")
+    # Also copy instrumented methods JSON file if it exists
+    instrumented_methods_file = os.path.join(work_dir, "instrumented_methods.json")
+    if os.path.exists(instrumented_methods_file):
+        try:
+            dst_path = os.path.join(collection_dir, "instrumented_methods.json")
+            shutil.copy2(instrumented_methods_file, dst_path)
+            copied_files.append("instrumented_methods.json")
+            log.debug(f"Copied instrumented_methods.json to {dst_path}")
+        except OSError as e:
+            log.error(f"Failed to copy instrumented_methods.json: {e}")
+    
+    if not copied_files:
+        log.warning(f"No files found to collect in {dumps_dir}")
+        return collection_dir
+    
+    log.info(f"Collected {len(copied_files)} files to {collection_dir}")
+    
+    # Post-process the collected files to remove MAX_DEPTH_REACHED entries
+    try:
+        log.info("Post-processing collected files to remove MAX_DEPTH_REACHED entries...")
+        stats = post_process_dump_files(collection_dir, backup=True)
+        log.info(f"Post-processing complete: {stats['jsonl_files_processed']} JSONL files, "
+                f"{stats['json_files_processed']} JSON files, {stats['total_lines_processed']} lines processed")
+        if stats['errors'] > 0:
+            log.warning(f"Post-processing had {stats['errors']} errors")
+    except Exception as e:
+        log.error(f"Post-processing failed: {e}")
+        # Don't fail the collection process if post-processing fails
+    
     return collection_dir
 
 

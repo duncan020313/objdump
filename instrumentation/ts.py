@@ -49,6 +49,7 @@ def extract_changed_methods(java_source: str, changed_ranges: List[Tuple[int, in
             method_signatures.add((return_text + name_text + params_text).strip())
         for i in range(node.child_count):
             stack.append(node.child(i))
+
     return sorted(method_signatures)
 
 

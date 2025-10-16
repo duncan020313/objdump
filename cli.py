@@ -26,16 +26,20 @@ def main() -> None:
     p_matrix.add_argument("--max-bugs-per-project", type=int, default=0, help="0 means no cap")
     p_matrix.add_argument("--workers", type=int, default=4)
     p_matrix.add_argument("--jackson-version", dest="jackson_version", default="2.13.0")
-    p_matrix.add_argument("--instrument-all-modified", action="store_true")
     p_matrix.add_argument("--work-base", default="/tmp/objdump-d4j")
     p_matrix.add_argument("--reports-dir", default="reports")
     p_matrix.add_argument("--reports-basename", default="", help="Base name for report files; default uses timestamp")
     p_matrix.add_argument("--dumps-dir", default="/tmp/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
 
+    p_postprocess = sub.add_parser("postprocess", help="Post-process dump files to remove MAX_DEPTH_REACHED entries")
+    p_postprocess.add_argument("dump_dir", help="Directory containing dump files to process")
+    p_postprocess.add_argument("--no-backup", action="store_true", help="Do not create backup files")
+    p_postprocess.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+
     args = parser.parse_args()
 
     if args.cmd == "all":
-        run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.instrument_all_modified, args.report_file)
+        run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.report_file)
     elif args.cmd == "matrix":
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         os.makedirs(args.reports_dir, exist_ok=True)
@@ -83,6 +87,27 @@ def main() -> None:
         from reports import write_summary_statistics, write_detailed_errors
         write_summary_statistics(summary_path, results, args.dumps_dir)
         write_detailed_errors(errors_path, results, args.dumps_dir)
+    
+    elif args.cmd == "postprocess":
+        from instrumentation.post_processor import post_process_dump_files
+        
+        if not os.path.exists(args.dump_dir):
+            print(f"Error: Directory {args.dump_dir} does not exist")
+            return
+        
+        print(f"Post-processing dump files in {args.dump_dir}")
+        stats = post_process_dump_files(args.dump_dir, backup=not args.no_backup)
+        
+        if args.verbose:
+            print(f"Processing complete:")
+            print(f"  JSONL files processed: {stats['jsonl_files_processed']}")
+            print(f"  JSON files processed: {stats['json_files_processed']}")
+            print(f"  Total lines processed: {stats['total_lines_processed']}")
+            print(f"  Errors: {stats['errors']}")
+        else:
+            print(f"Processed {stats['jsonl_files_processed']} JSONL files, {stats['json_files_processed']} JSON files")
+            if stats['errors'] > 0:
+                print(f"Warning: {stats['errors']} errors occurred during processing")
 
 
 if __name__ == "__main__":

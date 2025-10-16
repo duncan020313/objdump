@@ -52,6 +52,45 @@ def export(work_dir: str, prop: str) -> Optional[str]:
     return res.out.strip() or None
 
 
+def get_source_classes_dir(work_dir: str) -> str:
+    """
+    Robustly detect the source classes directory for Java files.
+    
+    Uses defects4j export -p "dir.src.classes" to get the correct path,
+    with fallback to common directory structures if export fails.
+    
+    Args:
+        work_dir: Working directory of the Defects4J project
+        
+    Returns:
+        Relative path to the source classes directory (e.g., "src/main/java" or "src/java")
+    """
+    # Try to get the directory from Defects4J export
+    classes_dir = export(work_dir, "dir.src.classes")
+    if classes_dir:
+        return classes_dir
+    
+    # Fallback: check for common directory structures
+    import os
+    common_paths = [
+        "src/main/java",
+        "src/java", 
+        "src",
+        "java"
+    ]
+    
+    for path in common_paths:
+        full_path = os.path.join(work_dir, path)
+        if os.path.exists(full_path) and os.path.isdir(full_path):
+            # Check if it contains Java files
+            for root, dirs, files in os.walk(full_path):
+                if any(f.endswith('.java') for f in files):
+                    return path
+    
+    # Default fallback
+    return "src/main/java"
+
+
 
 def list_bug_ids(project_id: str) -> List[int]:
     """Return all bug ids for a given Defects4J project.

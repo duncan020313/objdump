@@ -4,8 +4,19 @@ A modular tool to dump object state and method invocations in Defects4J Java pro
 
 ## Install
 
-- Requires: Python 3.8+, `defects4j`, `tree-sitter-languages`.
-- Optional: `curl` for downloading JARs (Ant projects).
+- Requires: Python 3.8+, Java 8+, Maven, `defects4j`
+- Optional: `curl` for downloading JARs (Ant projects)
+
+### Building the Java Instrumenter
+
+The project uses a Java-based instrumenter for AST parsing and code transformation:
+
+```bash
+cd java_instrumenter
+mvn clean package
+```
+
+This creates `java_instrumenter/target/instrumenter.jar` which is automatically used by Python.
 
 ## CLI
 
@@ -20,15 +31,24 @@ python -m objdump.cli matrix [--projects "Chart,Closure,Lang,Math,Mockito,Time"]
 - --instrument-all-modified: instrument all methods in modified classes when diff not found
 - --report-file: write instrumented method paths JSON to this file (also printed)
 
+## Architecture
+
+The system uses a **hybrid Java + Python architecture**:
+
+- **Java**: Handles AST parsing, diff analysis, JavaDoc extraction, and code transformation using JavaParser
+- **Python**: Handles project orchestration, build system management, and test execution
+
+This separation provides better reliability for Java code transformation while keeping Python for high-level workflow.
+
 ## What it does
 
 1. Checks out buggy and fixed versions to `<WORK_DIR>` and `<WORK_DIR>_fixed`.
 2. Detects build system (Maven/Ant) and injects Jackson deps.
 3. Compiles the project with `defects4j compile`.
-4. Computes diffs of modified classes and extracts changed methods via Tree-sitter.
+4. Computes diffs of modified classes and extracts changed methods via Java-based instrumenter.
 5. Injects helper sources `org.instrument` with `DumpObj`, `DebugDump`, and `DumpWrapper`.
-6. Instruments changed methods using a wrapping approach that automatically handles entry/exit logging and exception propagation.
-7. Emits JSON list of instrumented method paths as `<abs_path>::<signature>` to stdout and to `--report-file` (or `<WORK_DIR>/instrumented_methods.json`).
+6. Instruments changed methods by transforming the AST to add entry/exit logging and exception handling.
+7. Emits JSON report of instrumented methods with code, JavaDoc, and signatures to `--report-file` (or `<WORK_DIR>/instrumented_methods.json`).
 8. Rebuilds and runs triggering tests (if available). For each triggering test, writes a JSONL dump to `<WORK_DIR>/dumps/<TEST_NAME>.jsonl`. If no triggering tests are available, writes a single dump to `<WORK_DIR>/dump.jsonl` when running the full suite.
 
 ## Instrumentation Approach
@@ -67,15 +87,42 @@ public String processData(String input, int count) {
 - Automatic parameter name extraction using Java Reflection
 - Automatic entry/exit logging with exception handling
 
+## Report Format
+
+The tool generates `instrumented_methods.json` with detailed information about each instrumented method:
+
+```json
+[
+  {
+    "file": "/absolute/path/to/File.java",
+    "signature": "returnType methodName(paramTypes)",
+    "code": "full method source code including annotations",
+    "javadoc": {
+      "description": "Main description text",
+      "params": {
+        "paramName": "parameter description"
+      },
+      "returns": "return value description",
+      "throws": {
+        "ExceptionType": "exception description"
+      }
+    }
+  }
+]
+```
+
+If a method has no JavaDoc, the `javadoc` field will be `null`.
+
 ## Package layout
 
 - `objdump/cli.py`: CLI entry (subcommands ready to extend)
 - `objdump/project.py`: end-to-end orchestration
 - `objdump/defects4j.py`: checkout, export, compile, test
 - `objdump/build_systems/`: maven, ant, detector
-- `objdump/instrumentation/`: diff, tree-sitter, instrumenter, helpers
+- `objdump/instrumentation/`: instrumenter (Python wrapper), helpers
 - `objdump/io/`: shell, fs, net utilities
 - `objdump/java_templates/`: DumpObj.java, DebugDump.java, DumpWrapper.java
+- `java_instrumenter/`: Java-based AST parser and code transformer (JavaParser)
 - `tests/`: unit and integration tests for instrumentation
 
 ## Programmatic usage

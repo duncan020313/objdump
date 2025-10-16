@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 
-def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> None:
+def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0", class_dir: str = "src/main/java") -> None:
     """Inject Jackson jars and instrument classes into Ant build.xml classpaths and properties."""
     p = Path(build_xml_path)
     if not p.is_file():
@@ -31,13 +31,23 @@ def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> No
     ensure_property('jackson.core.jar', f"lib/jackson-core-{jackson_version}.jar")
     ensure_property('jackson.databind.jar', f"lib/jackson-databind-{jackson_version}.jar")
     ensure_property('jackson.annotations.jar', f"lib/jackson-annotations-{jackson_version}.jar")
-    ensure_property('instrument.src.dir', 'src/main/java/org/instrument')
+    ensure_property('instrument.src.dir', f'{class_dir}/org/instrument')
 
     def ensure_pathelems(path_el: ET.Element):
         existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
         for loc in ('${jackson.core.jar}', '${jackson.databind.jar}', '${jackson.annotations.jar}'):
             if loc not in existing:
                 ET.SubElement(path_el, 'pathelement', {'location': loc})
+        
+        # Also add direct JAR file paths as fallback
+        jar_files = [
+            f"lib/jackson-core-{jackson_version}.jar",
+            f"lib/jackson-databind-{jackson_version}.jar", 
+            f"lib/jackson-annotations-{jackson_version}.jar"
+        ]
+        for jar_file in jar_files:
+            if jar_file not in existing:
+                ET.SubElement(path_el, 'pathelement', {'location': jar_file})
 
     def ensure_srcpath(path_el: ET.Element):
         existing = {pe.attrib.get('location') for pe in path_el.findall('pathelement')}
@@ -89,11 +99,47 @@ def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0") -> No
                         ensure_pathelems(path_tag)
                         ensure_srcpath(path_tag)
                         break
+            
+            # If still no classpath found, create one with Jackson dependencies
+            if classpath is None and not classpath_ref:
+                classpath = ET.SubElement(javac, 'classpath')
+                ensure_pathelems(classpath)
+                ensure_srcpath(classpath)
+
+    # Add Jackson to junit tasks
+    for junit in root.findall('.//junit'):
+        # Check if junit has inline classpath definition
+        classpath = junit.find('classpath')
+        if classpath is not None:
+            # Check if classpath has refid attribute
+            if 'refid' in classpath.attrib:
+                # Modify the referenced path
+                ref_id = classpath.attrib['refid']
+                for path_tag in root.findall('path'):
+                    if path_tag.get('id') == ref_id:
+                        ensure_pathelems(path_tag)
+                        ensure_srcpath(path_tag)
+                        break
+            else:
+                # No refid, add pathelements directly
+                ensure_pathelems(classpath)
+                ensure_srcpath(classpath)
+        else:
+            # If no inline classpath, check for classpath reference
+            classpath_ref = junit.get('classpath')
+            if classpath_ref and classpath_ref.startswith('${') and classpath_ref.endswith('}'):
+                # This references a global path
+                path_id = classpath_ref[2:-1]
+                for path_tag in root.findall('path'):
+                    if path_tag.get('id') == path_id:
+                        ensure_pathelems(path_tag)
+                        ensure_srcpath(path_tag)
+                        break
 
     tree.write(build_xml_path, encoding='utf-8', xml_declaration=True)
 
 
-def add_dependencies_to_all_ant_files(work_dir: str, jackson_version: str = "2.13.0") -> None:
+def add_dependencies_to_all_ant_files(work_dir: str, jackson_version: str = "2.13.0", class_dir: str = "src/main/java") -> None:
     """Find and modify all Ant build XML files in work directory."""
     ant_files = []
     
@@ -106,7 +152,7 @@ def add_dependencies_to_all_ant_files(work_dir: str, jackson_version: str = "2.1
     # Process each build file
     for build_file in ant_files:
         try:
-            add_dependencies(build_file, jackson_version)
+            add_dependencies(build_file, jackson_version, class_dir)
         except Exception as e:
             # Log error but continue with other files
             print(f"Warning: Failed to modify {build_file}: {e}")

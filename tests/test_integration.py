@@ -4,8 +4,8 @@ import shutil
 import subprocess
 import json
 import pytest
-from objdump.instrumentation.instrumenter import instrument_java_file
-from objdump.instrumentation.helpers import ensure_helper_sources
+from instrumentation.instrumenter import instrument_java_file
+from instrumentation.helpers import ensure_helper_sources
 
 
 class TestIntegration:
