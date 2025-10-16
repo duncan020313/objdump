@@ -301,45 +301,7 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str, instrument_al
 
         changed[java_buggy] = sorted(set(extract_changed_methods(java_buggy, ranges["left"] + ranges["right"])))
 
-    instrumented_map: Dict[str, List[Dict[str, Any]]] = {}
-    
-    if changed:
-        instrumented_map = instrument_changed_methods(changed)
-    else:
-        if instrument_all_modified and modified_class_paths:
-            
-            all_map: Dict[str, List[str]] = {}
-            for p in modified_class_paths:
-                jf = os.path.join(work_dir, p + ".java")
-                if not os.path.isfile(jf):
-                    continue
-                try:
-                    lang = get_language("java")
-                    parser = Parser()
-                    parser.set_language(lang)
-                    with open(jf, "rb") as f:
-                        s = f.read()
-                    t = parser.parse(s)
-                    cursor = t.walk()
-                    stack = [cursor.node]
-                    sigs: Set[str] = set()
-                    from instrumentation.ts import method_signature_from_node
-                    while stack:
-                        n = stack.pop()
-                        if n.type in ("method_declaration", "constructor_declaration"):
-                            sigs.add(method_signature_from_node(s, n))
-                        for i in range(n.child_count):
-                            child = n.child(i)
-                            if child is not None:
-                                stack.append(child)
-                    if sigs:
-                        all_map[jf] = sorted(sigs)
-                except Exception:
-                    continue
-            if all_map:
-                instrumented_map = instrument_changed_methods(all_map)
-    
-    return instrumented_map
+    return instrument_changed_methods(changed)
 
 
 def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, Any]]], work_dir: str, report_file: Optional[str] = None) -> None:

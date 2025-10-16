@@ -1,15 +1,49 @@
 import argparse
 import os
+import csv
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set, Tuple
 from reports import write_jsonl, write_markdown_table, append_readme_summary
 
 
 from project import run_all, run_all_staged
 import defects4j
 
+
+def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int]]:
+    """Load valid bug IDs from CSV file.
+    
+    Returns:
+        Dictionary mapping project names to sets of valid bug IDs
+    """
+    valid_bugs = {}
+    
+    if not os.path.exists(csv_path):
+        print(f"Warning: {csv_path} not found. Will use all available bugs.")
+        return {}
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                project = row['project']
+                bug_id = int(row['bug_id'])
+                
+                if project not in valid_bugs:
+                    valid_bugs[project] = set()
+                valid_bugs[project].add(bug_id)
+        
+        print(f"Loaded valid bugs from {csv_path}:")
+        for project, bugs in valid_bugs.items():
+            print(f"  {project}: {len(bugs)} bugs")
+            
+    except Exception as e:
+        print(f"Error loading {csv_path}: {e}")
+        return {}
+    
+    return valid_bugs
 
 
 def main() -> None:
@@ -33,6 +67,7 @@ def main() -> None:
     p_matrix.add_argument("--reports-dir", default="reports")
     p_matrix.add_argument("--reports-basename", default="", help="Base name for report files; default uses timestamp")
     p_matrix.add_argument("--dumps-dir", default="/tmp/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
+    p_matrix.add_argument("--valid-bugs-csv", default="defects4j_valids.csv", help="CSV file containing valid bug IDs")
 
     p_postprocess = sub.add_parser("postprocess", help="Post-process dump files to remove MAX_DEPTH_REACHED entries")
     p_postprocess.add_argument("dump_dir", help="Directory containing dump files to process")
@@ -47,6 +82,9 @@ def main() -> None:
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         os.makedirs(args.reports_dir, exist_ok=True)
         
+        # Load valid bugs from CSV
+        valid_bugs = load_valid_bugs(args.valid_bugs_csv)
+        
         # Set environment variable for centralized dumps directory
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
         print(f"Dump files will be collected to: {args.dumps_dir}")
@@ -60,9 +98,18 @@ def main() -> None:
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
             futures = []
             for proj in projects:
-                ids = defects4j.list_bug_ids(proj)
+                # Use valid bugs if available, otherwise fall back to all bugs
+                if proj in valid_bugs:
+                    ids = sorted(list(valid_bugs[proj]))
+                    print(f"Using {len(ids)} valid bugs for {proj}")
+                else:
+                    ids = defects4j.list_bug_ids(proj)
+                    print(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
+                
                 if args.max_bugs_per_project > 0:
                     ids = ids[: args.max_bugs_per_project]
+                    print(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
+                
                 for bug_id in ids:
                     futures.append(ex.submit(job, proj, bug_id))
             for fut in as_completed(futures):
