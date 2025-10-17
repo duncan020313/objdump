@@ -229,7 +229,7 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     return work_dir, fixed_dir
 
 
-def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -> None:
+def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", skip_shared_build_injection: bool = False) -> None:
     """Setup Jackson dependencies for the project."""
     configure_logging()
     log = logging.getLogger("jackson_installer")
@@ -244,18 +244,19 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
     else:
         log.info("Unknown build system, trying Ant-style injection")
     
-    # Defects4J uses Ant under the hood; ensure Ant build has Jackson jars regardless
+    # Fix encoding and nowarn attributes in individual build files
     classes_dir = defects4j.get_source_classes_dir(work_dir)
     build_xml = os.path.join(work_dir, "build.xml")
     if os.path.isfile(build_xml):
         add_ant(build_xml, jackson_version, classes_dir)
     
-    # Find and modify all other build files that might need Jackson dependencies
-    inject_jackson_into_all_build_files(work_dir, jackson_version)
-    
-    # Inject Jackson into Defects4J shared build files to prevent classpath overrides
-    log.info("Injecting Jackson into Defects4J shared build files")
-    inject_jackson_into_defects4j_shared_build(jackson_version)
+    # Inject Jackson into Defects4J shared build files (centralized approach)
+    # Skip this if already done at the matrix level for efficiency
+    if not skip_shared_build_injection:
+        log.info("Injecting Jackson into Defects4J shared build files")
+        inject_jackson_into_defects4j_shared_build(jackson_version)
+    else:
+        log.info("Skipping shared build injection (already done at matrix level)")
 
     # Always ensure JARs present under lib/ for Ant-driven builds
     log.info("Downloading Jackson JAR files")
@@ -419,7 +420,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     collect_dump_files(work_dir, project_id, bug_id)
 
 
-def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None) -> Dict[str, Any]:
+def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None, skip_shared_build_injection: bool = False) -> Dict[str, Any]:
     """Run the full workflow with stage-wise status reporting using step functions.
 
     Returns a dictionary summarizing each stage outcome and any errors.
@@ -447,7 +448,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     status["stages"]["checkout"] = "ok"
     
     # Step 2: Setup Jackson dependencies
-    setup_jackson_dependencies(work_dir, jackson_version)
+    setup_jackson_dependencies(work_dir, jackson_version, skip_shared_build_injection)
     status["stages"]["jackson"] = "ok"
     
     # Step 3: Compile project

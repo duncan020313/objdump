@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
 from typing import List, Dict, Any, Set, Tuple
 from reports import write_jsonl, write_markdown_table, append_readme_summary
-
+from build_systems import inject_jackson_into_defects4j_shared_build
 
 from project import run_all, run_all_staged
 import defects4j
@@ -102,11 +102,18 @@ def main() -> None:
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
         print(f"Dump files will be collected to: {args.dumps_dir}")
 
+        # Inject Jackson into Defects4J shared build files once per project
+        # This is more efficient than doing it for each individual bug
+        
+        print("Injecting Jackson dependencies into Defects4J shared build files...")
+        inject_jackson_into_defects4j_shared_build(args.jackson_version)
+        print("Jackson injection completed for all projects")
+
         results: List[Dict[str, Any]] = []
 
         def job(proj: str, bug_id: int) -> Dict[str, Any]:
             work_dir = os.path.join(args.work_base, f"{proj.lower()}-{bug_id}")
-            return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version)
+            return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version, skip_shared_build_injection=True)
 
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
             futures = []
