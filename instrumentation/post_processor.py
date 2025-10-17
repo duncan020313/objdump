@@ -19,7 +19,7 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         cleaned = {}
         for key, value in data.items():
             # Skip keys that have MAX_DEPTH_REACHED as their value
-            if value == "[MAX_DEPTH_REACHED]":
+            if value == "[MAX_DEPTH_REACHED]" or value == [] or value == {}:
                 continue
             # Recursively process the value
             cleaned_value = remove_max_depth_reached_recursive(value)
@@ -33,7 +33,7 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         for item in data:
             cleaned_item = remove_max_depth_reached_recursive(item)
             # Only add non-empty items
-            if cleaned_item is not None and cleaned_item != "":
+            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]":
                 cleaned.append(cleaned_item)
         return cleaned
     else:
