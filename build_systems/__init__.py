@@ -95,14 +95,11 @@ def fix_encoding_in_build_files(work_dir: str) -> None:
 
 
 def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2.13.0") -> None:
-    """Find and modify all build XML files in work directory to include Jackson dependencies.
+    """Find and modify Maven build files in work directory to include Jackson dependencies.
     
-    This function:
-    1. Finds all build XML files (build.xml, defects4j.build.xml, maven-build.xml, etc.)
-    2. Applies appropriate Jackson dependency injection based on file type
-    3. Handles both Ant-style and Maven-style build files
+    Ant projects now use the centralized Defects4J shared build file for Jackson dependencies,
+    so this function only handles Maven POM files.
     """
-    from .ant import add_dependencies_to_all_ant_files
     from .maven import add_dependencies_to_maven_build_xml
     
     # Find all build files
@@ -119,15 +116,57 @@ def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2
             elif filename in ('maven-build.xml', 'defects4j.build.xml') or filename.endswith('-build.xml'):
                 # Handle Maven-generated Ant build files
                 add_dependencies_to_maven_build_xml(build_file, jackson_version)
-            elif filename == 'build.xml' or filename.endswith('.build.xml'):
-                # Handle standard Ant build files
-                from .ant import add_dependencies
-                add_dependencies(build_file, jackson_version)
+            # Ant build files (build.xml) are now handled by the shared Defects4J build file
                 
         except Exception as e:
             # Log error but continue with other files
             print(f"Warning: Failed to inject Jackson into {build_file}: {e}")
             continue
+
+
+def inject_jackson_into_project_templates(project_ids: List[str], jackson_version: str = "2.13.0") -> None:
+    """Inject Jackson dependencies into Defects4J project template build files.
+    
+    This function modifies project-specific template build files (e.g., Math.build.xml)
+    that are shared by all bugs in each project. It uses defects4j info to get the
+    correct build file path for each project.
+    
+    Args:
+        project_ids: List of Defects4J project IDs (e.g., ["Math", "Lang", "Chart"])
+        jackson_version: Jackson library version to use
+    """
+    from .ant import add_dependencies_to_project_template
+    from defects4j import get_project_build_file
+    
+    modified_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
+    for project_id in project_ids:
+        print(f"Processing project template for {project_id}...")
+        
+        # Get the project's build file path using defects4j info
+        build_file_path = get_project_build_file(project_id)
+        if not build_file_path:
+            print(f"Warning: Could not get build file path for project {project_id}")
+            failed_count += 1
+            continue
+        
+        # Add Jackson dependencies to the project template
+        success = add_dependencies_to_project_template(build_file_path, jackson_version)
+        if success:
+            modified_count += 1
+        else:
+            # Check if it was skipped due to already present
+            if "already present" in str(success) or success is False:
+                skipped_count += 1
+            else:
+                failed_count += 1
+    
+    print(f"Project template injection completed:")
+    print(f"  - Modified: {modified_count}")
+    print(f"  - Skipped (already present): {skipped_count}")
+    print(f"  - Failed: {failed_count}")
 
 
 def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") -> None:

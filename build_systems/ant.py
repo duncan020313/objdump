@@ -106,6 +106,117 @@ def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") 
         print(f"Warning: Failed to inject Jackson into shared build file: {e}")
 
 
+def add_dependencies_to_project_template(build_file_path: str, jackson_version: str = "2.13.0") -> bool:
+    """Add Jackson dependencies to a Defects4J project template build file.
+    
+    This function modifies project-specific template build files (e.g., Math.build.xml)
+    that are shared by all bugs in a project. It includes duplicate prevention logic.
+    
+    Args:
+        build_file_path: Path to the project template build file
+        jackson_version: Jackson library version to use
+        
+    Returns:
+        True if modifications were made, False if already present or failed
+    """
+    if not os.path.exists(build_file_path):
+        print(f"Warning: Project build file not found: {build_file_path}")
+        return False
+    
+    try:
+        tree = ET.parse(build_file_path)
+        root = tree.getroot()
+        
+        # Check if Jackson properties already exist
+        jackson_props = ['jackson.version', 'jackson.core.jar', 'jackson.databind.jar', 'jackson.annotations.jar']
+        existing_props = set()
+        for prop in root.findall('property'):
+            prop_name = prop.attrib.get('name', '')
+            if prop_name in jackson_props:
+                existing_props.add(prop_name)
+        
+        # Check if Jackson JARs are already in classpaths
+        jackson_jars_in_classpath = False
+        for path_tag in root.findall('path'):
+            for pathelement in path_tag.findall('pathelement'):
+                location = pathelement.attrib.get('location', '')
+                # Check for both property references and direct JAR paths
+                if (any(jar in location for jar in ['jackson-core', 'jackson-databind', 'jackson-annotations']) or
+                    any(prop in location for prop in ['${jackson.core.jar}', '${jackson.databind.jar}', '${jackson.annotations.jar}'])):
+                    jackson_jars_in_classpath = True
+                    break
+            if jackson_jars_in_classpath:
+                break
+        
+        # If Jackson is already fully integrated, skip
+        if len(existing_props) == len(jackson_props) and jackson_jars_in_classpath:
+            print(f"Jackson dependencies already present in {build_file_path}, skipping")
+            return False
+        
+        # Add Jackson properties if missing
+        def ensure_property(name: str, value: str):
+            for prop in root.findall('property'):
+                if prop.attrib.get('name') == name:
+                    return prop
+            el = ET.Element('property', {'name': name, 'value': value})
+            children = list(root)
+            insert_idx = 0
+            for i, ch in enumerate(children):
+                if ch.tag in ('path', 'target'):
+                    insert_idx = i
+                    break
+                insert_idx = i + 1
+            root.insert(insert_idx, el)
+            return el
+        
+        # Add Jackson properties
+        ensure_property('jackson.version', jackson_version)
+        ensure_property('jackson.core.jar', f"${{d4j.workdir}}/lib/jackson-core-{jackson_version}.jar")
+        ensure_property('jackson.databind.jar', f"${{d4j.workdir}}/lib/jackson-databind-{jackson_version}.jar")
+        ensure_property('jackson.annotations.jar', f"${{d4j.workdir}}/lib/jackson-annotations-{jackson_version}.jar")
+        
+        # Add Jackson to compile classpath
+        for path_tag in root.findall('path'):
+            if path_tag.get('id') == 'compile.classpath':
+                existing_locations = {pe.attrib.get('location') for pe in path_tag.findall('pathelement')}
+                
+                jackson_deps = [
+                    f"${{jackson.core.jar}}",
+                    f"${{jackson.databind.jar}}",
+                    f"${{jackson.annotations.jar}}"
+                ]
+                
+                for dep in jackson_deps:
+                    if dep not in existing_locations:
+                        ET.SubElement(path_tag, 'pathelement', {'location': dep})
+                break
+        
+        # Add Jackson to build classpath if it exists
+        for path_tag in root.findall('path'):
+            if path_tag.get('id') == 'build.classpath':
+                existing_locations = {pe.attrib.get('location') for pe in path_tag.findall('pathelement')}
+                
+                jackson_deps = [
+                    f"${{jackson.core.jar}}",
+                    f"${{jackson.databind.jar}}",
+                    f"${{jackson.annotations.jar}}"
+                ]
+                
+                for dep in jackson_deps:
+                    if dep not in existing_locations:
+                        ET.SubElement(path_tag, 'pathelement', {'location': dep})
+                break
+        
+        # Write the modified file
+        tree.write(build_file_path, encoding='utf-8', xml_declaration=True)
+        print(f"Successfully added Jackson dependencies to {build_file_path}")
+        return True
+        
+    except Exception as e:
+        print(f"Error modifying project build file {build_file_path}: {e}")
+        return False
+
+
 def _inject_jackson_into_shared_build_file(build_file: str, jackson_version: str) -> None:
     """Check if Jackson dependencies are already present in the shared build file.
     
