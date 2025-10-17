@@ -130,3 +130,14 @@ def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2
             continue
 
 
+def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") -> None:
+    """Inject Jackson dependencies into all Defects4J shared project build files.
+    
+    This function modifies the shared build files in /defects4j/framework/projects/
+    that are used by all bugs of each project. It prevents duplicate injection
+    by checking if Jackson properties and paths already exist.
+    """
+    from .ant import inject_jackson_into_defects4j_shared_build as _inject_shared
+    _inject_shared(jackson_version)
+
+

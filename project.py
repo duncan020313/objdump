@@ -9,7 +9,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
-from build_systems import detect, find_all_build_files, inject_jackson_into_all_build_files
+from build_systems import detect, find_all_build_files, inject_jackson_into_all_build_files, inject_jackson_into_defects4j_shared_build
 from build_systems.maven import add_dependencies as add_maven
 from build_systems.ant import add_dependencies as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
@@ -252,6 +252,10 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
     
     # Find and modify all other build files that might need Jackson dependencies
     inject_jackson_into_all_build_files(work_dir, jackson_version)
+    
+    # Inject Jackson into Defects4J shared build files to prevent classpath overrides
+    log.info("Injecting Jackson into Defects4J shared build files")
+    inject_jackson_into_defects4j_shared_build(jackson_version)
 
     # Always ensure JARs present under lib/ for Ant-driven builds
     log.info("Downloading Jackson JAR files")
