@@ -229,10 +229,18 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     return work_dir, fixed_dir
 
 
-def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", skip_shared_build_injection: bool = False) -> None:
+def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", skip_shared_build_injection: bool = False, project_id: Optional[str] = None) -> None:
     """Setup Jackson dependencies for the project."""
     configure_logging()
     log = logging.getLogger("jackson_installer")
+    
+    # Inject Jackson into project template build files first
+    if project_id:
+        log.info(f"Injecting Jackson into project template for {project_id}")
+        from build_systems import inject_jackson_into_project_templates
+        inject_jackson_into_project_templates([project_id], jackson_version)
+    else:
+        log.info("No project ID provided, skipping project template injection")
     
     build_system = detect(work_dir)
     if build_system == BuildSystem.MAVEN:
@@ -401,7 +409,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
     
     # Step 2: Setup Jackson dependencies
-    setup_jackson_dependencies(work_dir, jackson_version)
+    setup_jackson_dependencies(work_dir, jackson_version, project_id=project_id)
     
     # Step 3: Compile project
     if not compile_project(work_dir):
@@ -448,7 +456,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     status["stages"]["checkout"] = "ok"
     
     # Step 2: Setup Jackson dependencies
-    setup_jackson_dependencies(work_dir, jackson_version, skip_shared_build_injection)
+    setup_jackson_dependencies(work_dir, jackson_version, skip_shared_build_injection, project_id)
     status["stages"]["jackson"] = "ok"
     
     # Step 3: Compile project

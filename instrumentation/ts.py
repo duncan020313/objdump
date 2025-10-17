@@ -48,7 +48,9 @@ def extract_changed_methods(java_source: str, changed_ranges: List[Tuple[int, in
             return_text = slice_bytes(type_node.start_byte, type_node.end_byte).decode("utf-8") + " " if type_node else ""
             method_signatures.add((return_text + name_text + params_text).strip())
         for i in range(node.child_count):
-            stack.append(node.child(i))
+            c = node.child(i)
+            if c is not None:
+                stack.append(c)
 
     return sorted(method_signatures)
 

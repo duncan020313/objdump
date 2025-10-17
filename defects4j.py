@@ -8,7 +8,7 @@ def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -
     return res.code == 0
 
 
-def compile(work_dir: str, env: Dict[str, str] = None) -> Tuple[bool, str, str]:
+def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, str, str]:
     """Compile the project and return (success, stdout, stderr)."""
     res = run(["defects4j", "compile"], cwd=work_dir, env=env)
     if res.code != 0:
@@ -21,7 +21,7 @@ def compile(work_dir: str, env: Dict[str, str] = None) -> Tuple[bool, str, str]:
     return True, res.out or "", res.err or ""
 
 
-def test(work_dir: str, tests: Optional[List[str]] = None, env: Dict[str, str] = None) -> bool:
+def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None) -> bool:
     if tests:
         all_ok = True
         for entry in tests:
@@ -208,6 +208,33 @@ def info(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
             bug_info["modified_sources"].append(source)
     
     return bug_info
+
+
+def get_project_build_file(project_id: str) -> Optional[str]:
+    """Get the project template build file path from defects4j info command.
+    
+    Args:
+        project_id: Defects4J project ID (e.g., "Math")
+        
+    Returns:
+        Path to the project's template build file, or None if not found
+    """
+    res = run(["defects4j", "info", "-p", project_id])
+    if res.code != 0:
+        return None
+    
+    output = res.out or ""
+    lines = output.splitlines()
+    
+    # Look for "Build file:" line
+    for line in lines:
+        line = line.strip()
+        if line.startswith("Build file:"):
+            # Extract the path after "Build file:"
+            build_file_path = line.split("Build file:", 1)[1].strip()
+            return build_file_path
+    
+    return None
 
 
 def classify_bug(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
