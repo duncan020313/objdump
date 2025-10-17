@@ -57,13 +57,18 @@ public class CodeTransformer {
         CompilationUnit cu = parseResult.getResult().get();
         
         // Find methods to instrument from the SAME CompilationUnit
-        Set<String> targetSet = new HashSet<>(targetSignatures);
+        // Normalize target signatures to handle whitespace differences
+        Set<String> targetSet = new HashSet<>();
+        for (String signature : targetSignatures) {
+            targetSet.add(normalizeSignature(signature));
+        }
         List<MethodExtractor.MethodInfo> methodsToInstrument = new ArrayList<>();
         
         // Find methods with matching signatures
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             String signature = getMethodSignature(method);
-            if (targetSet.contains(signature)) {
+            String normalizedSignature = normalizeSignature(signature);
+            if (targetSet.contains(normalizedSignature)) {
                 methodsToInstrument.add(new MethodExtractor.MethodInfo(signature, method));
             }
         });
@@ -71,13 +76,58 @@ public class CodeTransformer {
         // Find constructors with matching signatures
         cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
             String signature = getConstructorSignature(constructor);
-            if (targetSet.contains(signature)) {
+            String normalizedSignature = normalizeSignature(signature);
+            if (targetSet.contains(normalizedSignature)) {
                 methodsToInstrument.add(new MethodExtractor.MethodInfo(signature, constructor));
             }
         });
         
+        // Check for partial matches and report missing signatures
+        if (!methodsToInstrument.isEmpty() && methodsToInstrument.size() < targetSignatures.size()) {
+            Set<String> foundSignatures = new HashSet<>();
+            for (MethodExtractor.MethodInfo methodInfo : methodsToInstrument) {
+                foundSignatures.add(methodInfo.signature);
+            }
+            
+            List<String> missingSignatures = new ArrayList<>();
+            for (String targetSig : targetSignatures) {
+                if (!foundSignatures.contains(targetSig)) {
+                    missingSignatures.add(targetSig);
+                }
+            }
+            
+            if (!missingSignatures.isEmpty()) {
+                System.err.println("Warning: Some target signatures were not found in " + javaFilePath + ":");
+                for (String missing : missingSignatures) {
+                    System.err.println("  - " + missing);
+                }
+                System.err.println("Found " + methodsToInstrument.size() + " out of " + targetSignatures.size() + " requested signatures.");
+            }
+        }
+        
         if (methodsToInstrument.isEmpty()) {
-            return new ArrayList<>();
+            // Collect all available method signatures for debugging
+            List<String> availableMethods = new ArrayList<>();
+            cu.findAll(MethodDeclaration.class).forEach(method -> {
+                availableMethods.add(getMethodSignature(method));
+            });
+            cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
+                availableMethods.add(getConstructorSignature(constructor));
+            });
+            
+            // Create detailed error message
+            StringBuilder errorMsg = new StringBuilder();
+            errorMsg.append("No matching methods/constructors found in file: ").append(javaFilePath).append("\n");
+            errorMsg.append("Requested signatures:\n");
+            for (String sig : targetSignatures) {
+                errorMsg.append("  - ").append(sig).append("\n");
+            }
+            errorMsg.append("Available signatures in file:\n");
+            for (String sig : availableMethods) {
+                errorMsg.append("  - ").append(sig).append("\n");
+            }
+            
+            throw new IOException(errorMsg.toString());
         }
         
         List<TransformResult> results = new ArrayList<>();
@@ -479,6 +529,17 @@ public class CodeTransformer {
         }
         // Remove leading 'final' keyword and any following whitespace
         return typeString.replaceFirst("^final\\s+", "").trim();
+    }
+    
+    /**
+     * Normalize signature by collapsing all whitespace (including newlines) to single spaces
+     */
+    private static String normalizeSignature(String signature) {
+        if (signature == null) {
+            return null;
+        }
+        // Replace multiple whitespace (including newlines) with single space and trim
+        return signature.replaceAll("\\s+", " ").trim();
     }
     
     /**

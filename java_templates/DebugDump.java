@@ -16,7 +16,7 @@ import java.util.*;
 public final class DebugDump {
     // Custom serializer that limits depth to 3
     private static class DepthLimitedSerializer extends JsonSerializer<Object> {
-        private static final int MAX_DEPTH = 4;
+        private static final int MAX_DEPTH = 5;
         
         @Override
         public void serialize(Object value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
@@ -52,8 +52,9 @@ public final class DebugDump {
                 gen.writeEndArray();
             } else if (value.getClass().isArray()) {
                 gen.writeStartArray();
-                Object[] array = (Object[]) value;
-                for (Object item : array) {
+                int length = java.lang.reflect.Array.getLength(value);
+                for (int i = 0; i < length; i++) {
+                    Object item = java.lang.reflect.Array.get(value, i);
                     serializeWithDepth(item, gen, serializers, currentDepth + 1);
                 }
                 gen.writeEndArray();

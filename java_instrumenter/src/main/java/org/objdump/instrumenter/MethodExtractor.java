@@ -117,6 +117,17 @@ public class MethodExtractor {
     }
     
     /**
+     * Normalize signature by collapsing all whitespace (including newlines) to single spaces
+     */
+    private static String normalizeSignature(String signature) {
+        if (signature == null) {
+            return null;
+        }
+        // Replace multiple whitespace (including newlines) with single space and trim
+        return signature.replaceAll("\\s+", " ").trim();
+    }
+    
+    /**
      * Generate method signature (matching Python tree-sitter format)
      */
     private static String getMethodSignature(MethodDeclaration method) {
@@ -187,13 +198,18 @@ public class MethodExtractor {
         }
         
         CompilationUnit cu = parseResult.getResult().get();
-        Set<String> targetSet = new HashSet<>(targetSignatures);
+        // Normalize target signatures to handle whitespace differences
+        Set<String> targetSet = new HashSet<>();
+        for (String signature : targetSignatures) {
+            targetSet.add(normalizeSignature(signature));
+        }
         List<MethodInfo> methods = new ArrayList<>();
         
         // Find methods with matching signatures
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             String signature = getMethodSignature(method);
-            if (targetSet.contains(signature)) {
+            String normalizedSignature = normalizeSignature(signature);
+            if (targetSet.contains(normalizedSignature)) {
                 methods.add(new MethodInfo(signature, method));
             }
         });
@@ -201,7 +217,8 @@ public class MethodExtractor {
         // Find constructors with matching signatures
         cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
             String signature = getConstructorSignature(constructor);
-            if (targetSet.contains(signature)) {
+            String normalizedSignature = normalizeSignature(signature);
+            if (targetSet.contains(normalizedSignature)) {
                 methods.add(new MethodInfo(signature, constructor));
             }
         });
