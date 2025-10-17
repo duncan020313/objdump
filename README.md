@@ -21,8 +21,9 @@ This creates `java_instrumenter/target/instrumenter.jar` which is automatically 
 ## CLI
 
 ```bash
-python -m objdump.cli all <PROJECT> <BUG_ID> <WORK_DIR> [--jackson-version 2.13.0] [--instrument-all-modified] [--report-file <PATH>]
-python -m objdump.cli matrix [--projects "Chart,Closure,Lang,Math,Mockito,Time"] [--max-bugs-per-project 0] [--workers 4] [--jackson-version 2.13.0] [--instrument-all-modified] [--work-base /tmp/objdump-d4j] [--reports-dir reports]
+python -m objdump.cli all <PROJECT> <BUG_ID> <WORK_DIR> [--jackson-version 2.13.0] [--report-file <PATH>]
+python -m objdump.cli matrix [--projects "Chart,Closure,Lang,Math,Mockito,Time"] [--max-bugs-per-project 0] [--workers 4] [--jackson-version 2.13.0] [--work-base /tmp/objdump-d4j] [--reports-dir reports]
+python -m objdump.cli classify [--projects "Chart,Closure,Lang,Math,Mockito,Time"] [--max-bugs-per-project 0] [--workers 4] [--output <PATH>]
 ```
 
 - PROJECT: Defects4J project id (e.g., Math, Chart)
@@ -30,6 +31,60 @@ python -m objdump.cli matrix [--projects "Chart,Closure,Lang,Math,Mockito,Time"]
 - WORK_DIR: target directory for checkout
 - --instrument-all-modified: instrument all methods in modified classes when diff not found
 - --report-file: write instrumented method paths JSON to this file (also printed)
+
+### Bug Classification
+
+The `classify` command analyzes Defects4J bug information and classifies bugs based on their root cause:
+
+- **Functional bugs**: Contain `junit.framework.AssertionFailedError` in root cause
+- **Exceptional bugs**: All other error types
+
+The command supports both single bug classification (backward compatibility) and batch processing. By default, it processes **all available bugs** for each project (not limited to a predefined valid bugs list):
+
+```bash
+# Batch classification - all projects and all bugs (CSV output to stdout)
+python -m objdump.cli classify
+
+# Classify specific projects (all bugs)
+python -m objdump.cli classify --projects Math,Chart
+
+# Limit bugs per project
+python -m objdump.cli classify --projects Math --max-bugs-per-project 10
+
+# Save to CSV file
+python -m objdump.cli classify --output classifications.csv
+
+# Save to markdown table
+python -m objdump.cli classify --output-md classifications.md
+
+# Save to both CSV and markdown
+python -m objdump.cli classify --output classifications.csv --output-md classifications.md
+
+# Single bug classification (backward compatibility)
+python -m objdump.cli classify --project Math --bug 104
+```
+
+**Output Formats:**
+
+**CSV Format:**
+- `project`: Project name
+- `bug_id`: Bug ID
+- `type`: Classification (functional/exceptional)
+- `bug_report_id`: Bug report ID
+- `revision_id`: Git revision ID
+- `revision_date`: Revision date
+- `bug_report_url`: Bug report URL
+- `root_causes_count`: Number of root causes
+- `modified_sources_count`: Number of modified sources
+- `root_causes`: Semicolon-separated list of test:error pairs
+- `modified_sources`: Semicolon-separated list of modified classes
+- `error`: Error message if classification failed
+
+**Markdown Format:**
+- Summary section with counts by bug type
+- Table with Project, Bug ID, Type, Bug Report, Root Causes, and Modified Sources
+- Error section for failed classifications
+- Human-readable format suitable for documentation
 
 ## Architecture
 
@@ -141,3 +196,59 @@ run_all("Math", "1", "/tmp/math-1", jackson_version="2.13.0", instrument_all_mod
 
 - Maven projects rely on POM updates; Ant projects additionally download JARs into `lib/`.
 - Tree-sitter must be available for Java parsing.
+
+
+### Defects4J Activated Bugs Matrix (latest run: 2025-10-17 00:56 UTC)
+
+| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests | Dumps |
+|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|:-----:|
+| Math | 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 5 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 6 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 28 |
+| Math | 7 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 9 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 11 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 12 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 15 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 16 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 17 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 18 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 20 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 21 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 22 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 23 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 24 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 25 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 26 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 27 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 29 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 30 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 33 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 34 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 35 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 36 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 37 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 4 |
+| Math | 39 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 41 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 42 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 43 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 6 |
+| Math | 44 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 45 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 46 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 47 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 50 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 52 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 53 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 54 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 55 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 56 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 57 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 59 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 62 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 63 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 1 |
+| Math | 64 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |
+| Math | 65 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 66 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 4 |
+| Math | 67 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 0 |
+| Math | 68 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 📁 2 |

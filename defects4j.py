@@ -1,5 +1,6 @@
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 from objdump_io.shell import run
+import re
 
 
 def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -> bool:
@@ -114,4 +115,126 @@ def list_bug_ids(project_id: str) -> List[int]:
             # Ignore non-integer lines
             continue
     return sorted(ids)
+
+
+def info(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
+    """Get bug information from defects4j info command.
+    
+    Args:
+        project_id: Defects4J project ID (e.g., "Math")
+        bug_id: Bug ID (e.g., "104")
+        
+    Returns:
+        Dictionary containing parsed bug information, or None if command fails
+    """
+    res = run(["defects4j", "info", "-p", project_id, "-b", bug_id])
+    if res.code != 0:
+        return None
+    
+    output = res.out or ""
+    lines = output.splitlines()
+    
+    # Parse the output
+    bug_info = {
+        "project": project_id,
+        "bug_id": bug_id,
+        "revision_id": None,
+        "revision_date": None,
+        "bug_report_id": None,
+        "bug_report_url": None,
+        "root_causes": [],
+        "modified_sources": []
+    }
+    
+    current_section = None
+    for i, line in enumerate(lines):
+        original_line = line
+        line = line.strip()
+        
+        if line.startswith("Revision ID (fixed version):"):
+            # The value is on the next line
+            if i + 1 < len(lines):
+                bug_info["revision_id"] = lines[i + 1].strip()
+        elif line.startswith("Revision date (fixed version):"):
+            # The value is on the next line
+            if i + 1 < len(lines):
+                bug_info["revision_date"] = lines[i + 1].strip()
+        elif line.startswith("Bug report id:"):
+            # The value is on the next line
+            if i + 1 < len(lines):
+                bug_info["bug_report_id"] = lines[i + 1].strip()
+        elif line.startswith("Bug report url:"):
+            # The value is on the next line
+            if i + 1 < len(lines):
+                bug_info["bug_report_url"] = lines[i + 1].strip()
+        elif line.startswith("Root cause in triggering tests:"):
+            current_section = "root_causes"
+        elif line.startswith("List of modified sources:"):
+            current_section = "modified_sources"
+        elif line.startswith("Summary for Bug:") or line.startswith("Summary of configuration"):
+            current_section = None
+        elif line.startswith("---"):
+            # Only reset section if we're not in the middle of processing content
+            if current_section not in ["root_causes", "modified_sources"]:
+                current_section = None
+        elif current_section == "root_causes" and line.startswith("- "):
+            # Parse root cause line: "- org.package.Class::method --> error.message"
+            parts = line[2:].split(" --> ", 1)
+            if len(parts) == 2:
+                test_name = parts[0].strip()
+                error_message = parts[1].strip()
+                bug_info["root_causes"].append({
+                    "test": test_name,
+                    "error": error_message
+                })
+            else:
+                # Handle multi-line format where test is on one line and error on next
+                test_name = line[2:].strip()
+                # Look ahead for the error message on the next line
+                current_section = "root_causes_error"
+                bug_info["root_causes"].append({
+                    "test": test_name,
+                    "error": ""  # Will be filled in next iteration
+                })
+        elif current_section == "root_causes_error" and line.startswith("--> "):
+            # This is the error message line following a test name
+            error_message = line[4:].strip()  # Remove "--> " prefix
+            if bug_info["root_causes"]:
+                bug_info["root_causes"][-1]["error"] = error_message
+            current_section = "root_causes"
+        elif current_section == "modified_sources" and line.startswith("- "):
+            # Parse modified source line: "- org.package.Class"
+            source = line[2:].strip()
+            bug_info["modified_sources"].append(source)
+    
+    return bug_info
+
+
+def classify_bug(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
+    """Classify a bug as functional or exceptional based on root cause.
+    
+    Args:
+        project_id: Defects4J project ID (e.g., "Math")
+        bug_id: Bug ID (e.g., "104")
+        
+    Returns:
+        Dictionary containing bug info and classification, or None if info retrieval fails
+    """
+    bug_info = info(project_id, bug_id)
+    if not bug_info:
+        return None
+    
+    # Classify based on root cause errors
+    bug_type = "exceptional"  # Default to exceptional
+    
+    for root_cause in bug_info["root_causes"]:
+        error_message = root_cause.get("error", "")
+        if "junit.framework.AssertionFailedError" in error_message:
+            bug_type = "functional"
+            break
+    
+    bug_info["type"] = bug_type
+    return bug_info
+
+
 

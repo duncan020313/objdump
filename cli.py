@@ -1,6 +1,7 @@
 import argparse
 import os
 import csv
+import json
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
@@ -10,6 +11,7 @@ from reports import write_jsonl, write_markdown_table, append_readme_summary
 
 from project import run_all, run_all_staged
 import defects4j
+import classification
 
 
 def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int]]:
@@ -46,6 +48,8 @@ def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int
     return valid_bugs
 
 
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inject Jackson and instrument Defects4J projects")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -73,6 +77,15 @@ def main() -> None:
     p_postprocess.add_argument("dump_dir", help="Directory containing dump files to process")
     p_postprocess.add_argument("--no-backup", action="store_true", help="Do not create backup files")
     p_postprocess.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+
+    p_classify = sub.add_parser("classify", help="Classify bugs by root cause type")
+    p_classify.add_argument("--projects", default="Chart,Closure,Lang,Math,Mockito,Time", help="Comma-separated list of projects (default: all)")
+    p_classify.add_argument("--max-bugs-per-project", type=int, default=0, help="Maximum bugs per project (0 = no limit)")
+    p_classify.add_argument("--workers", type=int, default=4, help="Number of parallel workers")
+    p_classify.add_argument("--output", help="Output CSV file path (default: stdout)")
+    p_classify.add_argument("--output-md", help="Output markdown table file path")
+    p_classify.add_argument("--project", help="Single project ID (for backward compatibility)")
+    p_classify.add_argument("--bug", help="Single bug ID (for backward compatibility)")
 
     args = parser.parse_args()
 
@@ -154,6 +167,60 @@ def main() -> None:
             print(f"Processed {stats['jsonl_files_processed']} JSONL files, {stats['json_files_processed']} JSON files")
             if stats['errors'] > 0:
                 print(f"Warning: {stats['errors']} errors occurred during processing")
+    
+    elif args.cmd == "classify":
+        # Handle single bug classification (backward compatibility)
+        if args.project and args.bug:
+            bug_info = defects4j.classify_bug(args.project, args.bug)
+            
+            if not bug_info:
+                print(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
+                return
+            
+            # Format output as text for single bug
+            output = classification.format_single_bug_output(bug_info)
+            
+            # Output to file or stdout
+            if args.output:
+                with open(args.output, 'w') as f:
+                    f.write(output)
+                print(f"Classification saved to {args.output}")
+            else:
+                print(output)
+        
+        else:
+            # Handle batch classification
+            projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
+            
+            print(f"Classifying bugs for projects: {', '.join(projects)}")
+            print(f"Using {args.workers} parallel workers")
+            
+            # Use the classification module
+            all_results = classification.classify_projects(projects, args.max_bugs_per_project, args.workers)
+            
+            # Write outputs
+            if args.output:
+                classification.write_classification_csv(args.output, all_results)
+                print(f"CSV results saved to {args.output}")
+            
+            if args.output_md:
+                classification.write_classification_markdown(args.output_md, all_results)
+                print(f"Markdown results saved to {args.output_md}")
+            
+            if not args.output and not args.output_md:
+                # Write to stdout as CSV
+                import sys
+                import io
+                
+                # Create a string buffer to capture CSV output
+                output_buffer = io.StringIO()
+                classification.write_classification_csv(output_buffer, all_results)
+                csv_content = output_buffer.getvalue()
+                output_buffer.close()
+                
+                print(csv_content)
+            
+            print(f"Total bugs classified: {len(all_results)}")
 
 
 if __name__ == "__main__":
