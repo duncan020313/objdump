@@ -45,6 +45,22 @@ java -jar target/instrumenter.jar extract-methods Sample.java 10:15 25:30
 
 Output: JSON array of method signatures
 
+### Extract Test Methods
+
+```bash
+java -jar target/instrumenter.jar extract-tests <java_test_file>
+```
+
+Example:
+```bash
+java -jar target/instrumenter.jar extract-tests TestClass.java
+```
+
+Output: JSON array of test method names
+
+Supports both JUnit 4 (@Test annotation) and JUnit 3 (public void test* methods).
+Recursively extracts test methods from parent classes if the current class has no test methods.
+
 ## Integration with Python
 
 The Python orchestration layer calls this tool as a subprocess:

@@ -296,6 +296,49 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
         rf.write(payload)
 
 
+def filter_tests_by_directory_proximity(modified_classes: List[str], test_names: List[str]) -> List[str]:
+    """Filter test names to only include those in the same package directory as modified source files.
+    
+    Args:
+        modified_classes: List of modified source class names (e.g., ["org.apache.commons.math3.util.FastMath"])
+        test_names: List of test class names (e.g., ["org.apache.commons.math3.util.ResizableDoubleArrayTest"])
+        
+    Returns:
+        List of filtered test names that match package directories of modified classes
+    """
+    if not modified_classes or not test_names:
+        return test_names
+    
+    # Extract package paths from modified classes
+    modified_packages = set()
+    for class_name in modified_classes:
+        if '.' in class_name:
+            package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
+            modified_packages.add(package)
+    
+    if not modified_packages:
+        return test_names
+    
+    # Filter test names by package matching
+    filtered_tests = []
+    for test_name in test_names:
+        if '::' in test_name:
+            # Extract class name from test method (e.g., "Class::method" -> "Class")
+            class_name = test_name.split('::')[0]
+        else:
+            class_name = test_name
+            
+        if '.' in class_name:
+            test_package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
+            if test_package in modified_packages:
+                filtered_tests.append(test_name)
+        else:
+            # If no package info, include the test (fallback)
+            filtered_tests.append(test_name)
+    
+    return filtered_tests
+
+
 def run_tests(work_dir: str) -> Dict[str, str]:
     """Run all relevant tests for the project and return their pass/fail status.
     
@@ -315,12 +358,28 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     relevant_tests = defects4j.export(work_dir, "tests.relevant")
     trigger_tests = defects4j.export(work_dir, "tests.trigger")
     
+    # Get modified classes for filtering
+    modified_classes_raw = defects4j.export(work_dir, "classes.modified")
+    modified_classes = [s.strip() for s in modified_classes_raw.splitlines() if s.strip()] if modified_classes_raw else []
+    
     test_results = {}
     
-    names = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
+    # Filter relevant tests by directory proximity
+    names_raw = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
+    log.info(f"Original relevant tests: {len(names_raw)}")
+    
+    if modified_classes:
+        log.info(f"Modified classes: {modified_classes}")
+        names = filter_tests_by_directory_proximity(modified_classes, names_raw)
+        log.info(f"Filtered relevant tests: {len(names)}")
+    else:
+        names = names_raw
+        log.info("No modified classes found, using all relevant tests")
+    
     trigger_set = set()
     if trigger_tests:
         trigger_set = {t.strip() for t in trigger_tests.splitlines() if t.strip()}
+        log.info(f"Trigger tests: {len(trigger_set)}")
     
     # Expand test classes into individual methods
     expanded_test_names = set(expand_test_classes(work_dir, names, log))
@@ -335,8 +394,9 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     
     correct_tests = expanded_test_names - trigger_set
     
-    log.info(f"Correct tests: {len(correct_tests)}")
+    log.info(f"Correct tests (after filtering): {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
+    log.info(f"Total tests to run: {len(expanded_test_names)}")
     
     def run_test_wrapper(args):
         test_name, is_correct = args
@@ -359,7 +419,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
 def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
     """
-    Expand test class names into individual test methods.
+    Expand test class names into individual test methods using multithreading.
     
     Args:
         work_dir: Working directory of the Defects4J project
@@ -369,14 +429,12 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
     Returns:
         List of expanded test names (individual methods or original names if already methods)
     """
-    expanded_tests = []
-    
-    for test_name in test_names:
+    def expand_single_test(test_name: str) -> List[str]:
+        """Expand a single test class into individual test methods."""
         # Check if this is already a specific method (contains ::)
         if "::" in test_name:
             # Already a specific method, use as-is
-            expanded_tests.append(test_name)
-            continue
+            return [test_name]
         
         # This is a test class, try to expand it
         log.debug(f"Expanding test class: {test_name}")
@@ -386,23 +444,39 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
         if not test_file_path:
             log.warning(f"Could not resolve test class file for: {test_name}")
             # Fall back to running the entire class
-            expanded_tests.append(test_name)
-            continue
+            return [test_name]
         
         # Extract test methods from the class file
         test_methods = extract_test_methods(test_file_path)
         if not test_methods:
             log.warning(f"Could not extract test methods from: {test_file_path}")
             # Fall back to running the entire class
-            expanded_tests.append(test_name)
-            continue
+            return [test_name]
         
         # Add each test method with class name prefix
+        expanded_methods = []
         for method_name in test_methods:
             full_test_name = f"{test_name}::{method_name}"
-            expanded_tests.append(full_test_name)
+            expanded_methods.append(full_test_name)
         
         log.debug(f"Expanded {test_name} into {len(test_methods)} methods")
+        return expanded_methods
+    
+    # Use multithreading to expand test classes in parallel
+    expanded_tests = []
+    with ThreadPoolExecutor() as executor:
+        # Submit all test expansion tasks
+        futures = [executor.submit(expand_single_test, test_name) for test_name in test_names]
+        
+        # Collect results as they complete
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                expanded_tests.extend(result)
+            except Exception as e:
+                log.error(f"Error expanding test class: {e}")
+                # Add the original test name as fallback
+                expanded_tests.append(test_names[futures.index(future)])
     
     return expanded_tests
 

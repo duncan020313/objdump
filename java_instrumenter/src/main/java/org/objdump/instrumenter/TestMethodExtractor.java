@@ -72,15 +72,18 @@ public class TestMethodExtractor {
             }
         });
         
-        // Find parent class and recursively extract test methods
-        String parentClassPath = resolveParentClassPath(cu, javaFilePath);
-        if (parentClassPath != null && new File(parentClassPath).exists()) {
-            try {
-                List<String> parentTestMethods = extractTestMethodsRecursive(parentClassPath, visitedClasses);
-                testMethods.addAll(parentTestMethods);
-            } catch (IOException e) {
-                // Parent class file not found or cannot be parsed, continue with current class only
-                System.err.println("Warning: Could not parse parent class " + parentClassPath + ": " + e.getMessage());
+        // Only recurse to parent if current class has NO test methods
+        if (testMethods.isEmpty()) {
+            // Find parent class and recursively extract test methods
+            String parentClassPath = resolveParentClassPath(cu, javaFilePath);
+            if (parentClassPath != null && new File(parentClassPath).exists()) {
+                try {
+                    List<String> parentTestMethods = extractTestMethodsRecursive(parentClassPath, visitedClasses);
+                    testMethods.addAll(parentTestMethods);
+                } catch (IOException e) {
+                    // Parent class file not found or cannot be parsed, continue with current class only
+                    System.err.println("Warning: Could not parse parent class " + parentClassPath + ": " + e.getMessage());
+                }
             }
         }
         
