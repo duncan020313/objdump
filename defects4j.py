@@ -22,7 +22,7 @@ def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, 
     return True, res.out or "", res.err or ""
 
 
-def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 30) -> bool:
+def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 60) -> bool:
     log = logging.getLogger("defects4j")
     if tests:
         all_ok = True

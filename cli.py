@@ -17,6 +17,7 @@ from project import run_all, run_all_staged
 import defects4j
 import classification
 from logging_setup import configure_logging
+import merger
 
 def build_java_instrumenter() -> bool:
     """Build the Java instrumenter using Maven.
@@ -117,6 +118,10 @@ def main() -> None:
     p_classify.add_argument("--bug", help="Single bug ID (for backward compatibility)")
     p_classify.add_argument("--filter-functional", action="store_true", help="Filter functional bugs")
 
+    p_merge = sub.add_parser("merge", help="Merge JSON/JSONL files from directory into single JSON file")
+    p_merge.add_argument("target_dir", help="Directory to scan for JSON/JSONL files")
+    p_merge.add_argument("--output", "-o", required=True, help="Output JSON file path")
+
     args = parser.parse_args()
     
     configure_logging()
@@ -174,8 +179,6 @@ def main() -> None:
             work_dir = os.path.join(args.work_base, f"{proj.lower()}-{bug_id}")
             return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version, skip_shared_build_injection=True)
 
-        # Create progress bar with position=0 to keep it at the top
-        # Use dynamic_ncols=True to adapt to terminal width
         progress_bar = tqdm(
             total=total_bugs,
             desc="Processing bugs",
@@ -208,8 +211,8 @@ def main() -> None:
         progress_bar.close()
         
         # Log completion summary
-        successful = len([r for r in results if 'error' not in r])
-        failed = len([r for r in results if 'error' in r])
+        successful = len([r for r in results if r["error"] is None])
+        failed = len([r for r in results if r["error"] is not None])
         log.info(f"Matrix processing completed: {successful} successful, {failed} failed out of {total_bugs} total bugs")
 
         base = args.reports_basename.strip() or f"defects4j_matrix_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -294,6 +297,17 @@ def main() -> None:
             log.info(f"Markdown results saved to {args.output_md}")
         
         log.info(f"Total bugs classified: {len(all_results)}")
+    
+    elif args.cmd == "merge":
+        try:
+            stats = merger.merge_json_files(args.target_dir, args.output)
+            log.info(f"Merge completed: {stats['json_count']} JSON files, {stats['jsonl_count']} JSONL files processed")
+            log.info(f"Output size: {stats['output_size']:,} bytes")
+            if stats['errors'] > 0:
+                log.warning(f"Errors encountered: {stats['errors']}")
+        except Exception as e:
+            log.error(f"Merge failed: {e}")
+            sys.exit(1)
 
         
 if __name__ == "__main__":
