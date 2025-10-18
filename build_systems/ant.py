@@ -150,7 +150,6 @@ def add_dependencies_to_project_template(build_file_path: str, jackson_version: 
         
         # If Jackson is already fully integrated, skip
         if len(existing_props) == len(jackson_props) and jackson_jars_in_classpath:
-            print(f"Jackson dependencies already present in {build_file_path}, skipping")
             return False
         
         # Add Jackson properties if missing
@@ -266,7 +265,6 @@ def _inject_jackson_into_shared_build_file(build_file: str, jackson_version: str
             break
     
     if existing_props and jackson_path_exists and jackson_integrated:
-        print(f"Jackson dependencies already present in {build_file}, skipping")
         return
     
     print(f"Jackson dependencies not fully integrated in {build_file}, manual update may be needed")

@@ -1,18 +1,19 @@
 import json
 import os
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
-
+from genson import SchemaBuilder
 
 def remove_max_depth_reached_recursive(data: Any) -> Any:
     """
     Recursively remove keys with MAX_DEPTH_REACHED values and their children.
+    Also removes empty arrays and objects.
     
     Args:
         data: JSON data structure (dict, list, or primitive)
         
     Returns:
-        Cleaned data structure with MAX_DEPTH_REACHED keys removed
+        Cleaned data structure with MAX_DEPTH_REACHED keys and empty containers removed
     """
     if isinstance(data, dict):
         # Create a new dict without MAX_DEPTH_REACHED keys
@@ -24,7 +25,7 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
             # Recursively process the value
             cleaned_value = remove_max_depth_reached_recursive(value)
             # Only add the key if the cleaned value is not empty or None
-            if cleaned_value is not None and cleaned_value != "":
+            if cleaned_value is not None and cleaned_value != "" and cleaned_value != [] and cleaned_value != {}:
                 cleaned[key] = cleaned_value
         return cleaned
     elif isinstance(data, list):
@@ -33,7 +34,7 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         for item in data:
             cleaned_item = remove_max_depth_reached_recursive(item)
             # Only add non-empty items
-            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]":
+            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]" and cleaned_item != [] and cleaned_item != {}:
                 cleaned.append(cleaned_item)
         return cleaned
     else:
@@ -41,7 +42,13 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         return data
 
 
-def process_jsonl_file(input_path: str, output_path: str) -> int:
+def _write_schema_file(schema_output_path: str, schema_obj: Dict[str, Any]) -> None:
+    """Write a JSON Schema file with $schema set to the proper URL."""
+    with open(schema_output_path, 'w', encoding='utf-8') as sf:
+        json.dump(schema_obj, sf, indent=4, ensure_ascii=False, sort_keys=True)
+
+
+def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> int:
     """
     Process a JSONL file to remove MAX_DEPTH_REACHED entries.
     
@@ -53,6 +60,8 @@ def process_jsonl_file(input_path: str, output_path: str) -> int:
         Number of lines processed
     """
     processed_count = 0
+    builders: Dict[str, Any] = {}
+    genson_unavailable_warned = False
     
     with open(input_path, 'r', encoding='utf-8') as infile, \
          open(output_path, 'w', encoding='utf-8') as outfile:
@@ -70,10 +79,21 @@ def process_jsonl_file(input_path: str, output_path: str) -> int:
                 cleaned_data = remove_max_depth_reached_recursive(data)
                 
                 # Only write non-empty cleaned data
-                if cleaned_data:
-                    outfile.write(json.dumps(cleaned_data, ensure_ascii=False) + '\n')
-                    processed_count += 1
-                    
+                outfile.write(json.dumps(cleaned_data, ensure_ascii=False, indent=4, sort_keys=True) + '\n')
+                processed_count += 1
+
+                # Feed schema builders by phase if requested
+                if emit_schema and isinstance(cleaned_data, dict):
+                    phase = cleaned_data.get("phase")
+                    if phase in ("entry", "exit"):
+                        if phase not in builders:
+                            builder = SchemaBuilder()
+                            builders[phase] = builder
+                        builder = builders.get(phase)
+                        if builder is not None:
+                            # genson accepts dicts directly
+                            builder.add_object(cleaned_data)
+                
             except json.JSONDecodeError as e:
                 # Skip malformed JSON lines
                 print(f"Warning: Skipping malformed JSON line: {e}")
@@ -83,10 +103,16 @@ def process_jsonl_file(input_path: str, output_path: str) -> int:
                 print(f"Warning: Error processing line: {e}")
                 continue
     
+    # Emit per-phase schemas next to the JSONL file
+    if emit_schema and builders:
+        for phase, builder in builders.items():
+            schema_obj = builder.to_schema()
+            schema_path = f"{output_path}.{phase}.schema.json"
+            _write_schema_file(schema_path, schema_obj)
     return processed_count
 
 
-def process_json_file(input_path: str, output_path: str) -> bool:
+def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> bool:
     """
     Process a JSON file to remove MAX_DEPTH_REACHED entries.
     
@@ -106,7 +132,19 @@ def process_json_file(input_path: str, output_path: str) -> bool:
         
         # Write cleaned data
         with open(output_path, 'w', encoding='utf-8') as outfile:
-            json.dump(cleaned_data, outfile, indent=2, ensure_ascii=False)
+            json.dump(cleaned_data, outfile, indent=4, ensure_ascii=False, sort_keys=True)
+        
+        # Optionally emit schema next to the JSON file
+        if emit_schema:
+            builder = SchemaBuilder()
+            if isinstance(cleaned_data, list):
+                for item in cleaned_data:
+                    builder.add_object(item)
+            else:
+                builder.add_object(cleaned_data)
+            schema_obj = builder.to_schema()
+            schema_path = f"{output_path}.schema.json"
+            _write_schema_file(schema_path, schema_obj)
         
         return True
         
@@ -118,7 +156,7 @@ def process_json_file(input_path: str, output_path: str) -> bool:
         return False
 
 
-def post_process_dump_files(dump_dir: str, backup: bool = True) -> Dict[str, int]:
+def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: bool = True) -> Dict[str, int]:
     """
     Post-process all JSON/JSONL files in a directory to remove MAX_DEPTH_REACHED entries.
     
@@ -140,9 +178,9 @@ def post_process_dump_files(dump_dir: str, backup: bool = True) -> Dict[str, int
         print(f"Warning: Directory {dump_dir} does not exist")
         return stats
     
-    # Find all JSON and JSONL files
-    jsonl_files = list(Path(dump_dir).glob('*.jsonl'))
-    json_files = list(Path(dump_dir).glob('*.json'))
+    # Find all JSON and JSONL files, excluding schema files
+    jsonl_files = [f for f in Path(dump_dir).glob('*.jsonl') if 'schema' not in f.name.lower()]
+    json_files = [f for f in Path(dump_dir).glob('*.json') if 'schema' not in f.name.lower()]
     
     # Process JSONL files
     for jsonl_file in jsonl_files:
@@ -155,7 +193,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True) -> Dict[str, int
                 input_path = str(jsonl_file)
             
             # Process the file
-            lines_processed = process_jsonl_file(input_path, str(jsonl_file))
+            lines_processed = process_jsonl_file(input_path, str(jsonl_file), emit_schema=emit_schema)
             stats['jsonl_files_processed'] += 1
             stats['total_lines_processed'] += lines_processed
             
@@ -178,7 +216,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True) -> Dict[str, int
                 input_path = str(json_file)
             
             # Process the file
-            if process_json_file(input_path, str(json_file)):
+            if process_json_file(input_path, str(json_file), emit_schema=emit_schema):
                 stats['json_files_processed'] += 1
             
             # Remove backup if processing was successful
@@ -196,11 +234,11 @@ def main():
     """Command line interface for post-processing dump files."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Post-process JSON dump files to remove MAX_DEPTH_REACHED entries')
+    parser = argparse.ArgumentParser(description='Post-process JSON dump files to remove MAX_DEPTH_REACHED entries and optionally emit JSON Schemas')
     parser.add_argument('dump_dir', help='Directory containing dump files')
     parser.add_argument('--no-backup', action='store_true', help='Do not create backup files')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
-    
+    parser.add_argument('--no-schema', action='store_true', help='Do not generate JSON Schema files')
     args = parser.parse_args()
     
     if not os.path.exists(args.dump_dir):
@@ -208,7 +246,11 @@ def main():
         return 1
     
     print(f"Post-processing dump files in {args.dump_dir}")
-    stats = post_process_dump_files(args.dump_dir, backup=not args.no_backup)
+    stats = post_process_dump_files(
+        args.dump_dir,
+        backup=not args.no_backup,
+        emit_schema=not args.no_schema,
+    )
     
     if args.verbose:
         print(f"Processing complete:")
