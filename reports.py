@@ -26,11 +26,11 @@ def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: s
             "files": []
         }
     
-    # Find all JSONL files in the collection directory
-    jsonl_pattern = os.path.join(collection_dir, "*.jsonl")
-    jsonl_files = glob.glob(jsonl_pattern)
+    # Find all JSON files in the collection directory
+    json_pattern = os.path.join(collection_dir, "*.json")
+    json_files = glob.glob(json_pattern)
     
-    if not jsonl_files:
+    if not json_files:
         return {
             "status": "empty",
             "collection_dir": collection_dir,
@@ -42,7 +42,7 @@ def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: s
     file_info = []
     total_size = 0
     
-    for file_path in jsonl_files:
+    for file_path in json_files:
         try:
             stat = os.stat(file_path)
             file_name = os.path.basename(file_path)
@@ -66,12 +66,11 @@ def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: s
     }
 
 
-def write_jsonl(path: str, rows: List[Dict[str, Any]]) -> None:
+def write_json(path: str, rows: List[Dict[str, Any]]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        for row in rows:
-            import json
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        import json
+        json.dump(rows, f, ensure_ascii=False, indent=2)
 
 
 def _stage_cell(stages: Dict[str, Any], key: str) -> str:

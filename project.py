@@ -222,7 +222,7 @@ def compile_project(work_dir: str) -> bool:
     
     
     # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
-    out_file = os.path.join(work_dir, "dump.jsonl")
+    out_file = os.path.join(work_dir, "dump.json")
     env_vars = {"OBJDUMP_OUT": out_file}
     success, _, _ = defects4j.compile(work_dir, env=env_vars)
     return success
@@ -349,7 +349,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     dumps_dir = os.path.join(work_dir, "dumps")
     os.makedirs(dumps_dir, exist_ok=True)
 
-    out_file = os.path.join(work_dir, "dump.jsonl")
+    out_file = os.path.join(work_dir, "dump.json")
     env_vars = {"OBJDUMP_OUT": out_file}
     
     defects4j.compile(work_dir, env=env_vars)
@@ -386,7 +386,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     
     def run_test(test_name: str, is_correct: bool) -> bool:
         safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
-        dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
+        dump_path = os.path.join(dumps_dir, f"{safe}.json")
         abs_dump_path = os.path.abspath(dump_path)
         per_test_env = {"OBJDUMP_OUT": abs_dump_path}
         defects4j.test(work_dir, [test_name], env=per_test_env)
@@ -585,7 +585,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     generate_instrumentation_report(instrumented_map, work_dir, report_file)
 
     # Step 5: Rebuild after instrumentation
-    rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")})
+    rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.json")})
     if not rebuild_success:
         status["stages"]["rebuild"] = "fail"
         error_details = f"stdout: {rebuild_out}\nstderr: {rebuild_err}" if rebuild_out or rebuild_err else "No detailed error information available"

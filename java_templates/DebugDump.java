@@ -113,6 +113,9 @@ public final class DebugDump {
     write(self, params, ret, id, "exit", methodSig, filePath);
   }
 
+  private static final List<Map<String, Object>> records = new ArrayList<Map<String, Object>>();
+  private static final Object lock = new Object();
+
   private static synchronized void write(Object self, Map<String, Object> params, Object ret, String id, String phase, String methodSig, String filePath) {
     try {
       Map<String, Object> record = new LinkedHashMap<String, Object>();
@@ -124,24 +127,29 @@ public final class DebugDump {
       record.put("method_signature", methodSig);
       record.put("file_path", filePath);
 
-      String json = M.writeValueAsString(record);
+      synchronized (lock) {
+        records.add(record);
+      }
 
       String outPath = System.getenv("OBJDUMP_OUT");
       if (outPath == null || outPath.isEmpty()) {
         outPath = "objdump.out";
       }
       
-      FileWriter fw = null;
-      BufferedWriter bw = null;
-      try {
-        fw = new FileWriter(outPath, true);
-        bw = new BufferedWriter(fw);
-        bw.write(json);
-        bw.newLine();
-        bw.flush();
-      } finally {
-        try { if (bw != null) bw.close(); } catch (IOException ignored) { }
-        try { if (fw != null) fw.close(); } catch (IOException ignored) { }
+      // Write all records as JSON array
+      synchronized (lock) {
+        FileWriter fw = null;
+        BufferedWriter bw = null;
+        try {
+          fw = new FileWriter(outPath, false);
+          bw = new BufferedWriter(fw);
+          String json = M.writeValueAsString(records);
+          bw.write(json);
+          bw.flush();
+        } finally {
+          try { if (bw != null) bw.close(); } catch (IOException ignored) { }
+          try { if (fw != null) fw.close(); } catch (IOException ignored) { }
+        }
       }
     } catch (Exception e) { 
         throw new RuntimeException(e);

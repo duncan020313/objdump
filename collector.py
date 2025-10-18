@@ -52,24 +52,24 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
     except OSError as e:
         raise OSError(f"Failed to create collection directory {collection_dir}: {e}")
     
-    # Find all JSONL files in dumps directory
-    jsonl_files = []
+    # Find all JSON files in dumps directory
+    json_files = []
     try:
         for filename in os.listdir(dumps_dir):
-            if filename.endswith('.jsonl'):
-                jsonl_files.append(filename)
+            if filename.endswith('.json'):
+                json_files.append(filename)
     except OSError as e:
         raise OSError(f"Failed to list files in dumps directory {dumps_dir}: {e}")
     
-    # Copy each JSONL file to appropriate subdirectory based on test results
+    # Copy each JSON file to appropriate subdirectory based on test results
     copied_files = []
-    for filename in jsonl_files:
+    for filename in json_files:
         src_path = os.path.join(dumps_dir, filename)
         
         # Determine target directory based on test results
         if test_results:
-            # Extract test name from filename (remove .jsonl and convert back from safe name)
-            test_name = filename[:-6]  # Remove .jsonl
+            # Extract test name from filename (remove .json and convert back from safe name)
+            test_name = filename[:-5]  # Remove .json
             # Find matching test in test_results
             test_status = None
             for test, status in test_results.items():
@@ -127,16 +127,16 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
             if os.path.exists(correct_dir):
                 log.info("Post-processing correct/ subdirectory...")
                 correct_stats = post_process_dump_files(correct_dir, backup=True)
-                log.info(f"Correct subdirectory: {correct_stats['jsonl_files_processed']} JSONL files processed")
+                log.info(f"Correct subdirectory: {correct_stats['jsonl_files_processed']} JSON files processed")
             
             if os.path.exists(wrong_dir):
                 log.info("Post-processing wrong/ subdirectory...")
                 wrong_stats = post_process_dump_files(wrong_dir, backup=True)
-                log.info(f"Wrong subdirectory: {wrong_stats['jsonl_files_processed']} JSONL files processed")
+                log.info(f"Wrong subdirectory: {wrong_stats['jsonl_files_processed']} JSON files processed")
         else:
             # Post-process root directory if no test results
             stats = post_process_dump_files(collection_dir, backup=True)
-            log.info(f"Post-processing complete: {stats['jsonl_files_processed']} JSONL files, "
+            log.info(f"Post-processing complete: {stats['jsonl_files_processed']} JSON files, "
                     f"{stats['json_files_processed']} JSON files, {stats['total_lines_processed']} lines processed")
             if stats['errors'] > 0:
                 log.warning(f"Post-processing had {stats['errors']} errors")

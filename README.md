@@ -188,7 +188,7 @@ This separation provides better reliability for Java code transformation while k
 5. Injects helper sources `org.instrument` with `DumpObj`, `DebugDump`, and `DumpWrapper`.
 6. Instruments changed methods by transforming the AST to add entry/exit logging and exception handling.
 7. Emits JSON report of instrumented methods with code, JavaDoc, and signatures to `--report-file` (or `<WORK_DIR>/instrumented_methods.json`).
-8. Rebuilds and runs triggering tests (if available). For each triggering test, writes a JSONL dump to `<WORK_DIR>/dumps/<TEST_NAME>.jsonl`. If no triggering tests are available, writes a single dump to `<WORK_DIR>/dump.jsonl` when running the full suite.
+8. Rebuilds and runs triggering tests (if available). For each triggering test, writes a JSON dump to `<WORK_DIR>/dumps/<TEST_NAME>.json`. If no triggering tests are available, writes a single dump to `<WORK_DIR>/dump.json` when running the full suite.
 
 ## Instrumentation Approach
 

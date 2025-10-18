@@ -8,7 +8,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
 from typing import List, Dict, Any, Set, Tuple
-from reports import write_jsonl, write_markdown_table
+from reports import write_json, write_markdown_table
 from build_systems import inject_jackson_into_defects4j_shared_build
 from reports import write_summary_statistics, write_detailed_errors
 from tqdm import tqdm
@@ -216,12 +216,12 @@ def main() -> None:
         log.info(f"Matrix processing completed: {successful} successful, {failed} failed out of {total_bugs} total bugs")
 
         base = args.reports_basename.strip() or f"defects4j_matrix_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-        jsonl_path = os.path.join(args.reports_dir, f"{base}.jsonl")
+        json_path = os.path.join(args.reports_dir, f"{base}.json")
         md_path = os.path.join(args.reports_dir, f"{base}.md")
         summary_path = os.path.join(args.reports_dir, f"{base}_summary.md")
         errors_path = os.path.join(args.reports_dir, f"{base}_errors.md")
         
-        write_jsonl(jsonl_path, results)
+        write_json(json_path, results)
         write_markdown_table(md_path, results, args.dumps_dir)
         
         # Write additional reports
@@ -239,12 +239,12 @@ def main() -> None:
         
         if args.verbose:
             log.info(f"Processing complete:")
-            log.info(f"  JSONL files processed: {stats['jsonl_files_processed']}")
+            log.info(f"  JSON files processed: {stats['jsonl_files_processed']}")
             log.info(f"  JSON files processed: {stats['json_files_processed']}")
             log.info(f"  Total lines processed: {stats['total_lines_processed']}")
             log.info(f"  Errors: {stats['errors']}")
         else:
-            log.info(f"Processed {stats['jsonl_files_processed']} JSONL files, {stats['json_files_processed']} JSON files")
+            log.info(f"Processed {stats['jsonl_files_processed']} JSON files, {stats['json_files_processed']} JSON files")
             if stats['errors'] > 0:
                 log.warning(f"Warning: {stats['errors']} errors occurred during processing")
     
@@ -301,7 +301,7 @@ def main() -> None:
     elif args.cmd == "merge":
         try:
             stats = merger.merge_json_files(args.target_dir, args.output)
-            log.info(f"Merge completed: {stats['json_count']} JSON files, {stats['jsonl_count']} JSONL files processed")
+            log.info(f"Merge completed: {stats['json_count']} JSON files processed")
             log.info(f"Output size: {stats['output_size']:,} bytes")
             if stats['errors'] > 0:
                 log.warning(f"Errors encountered: {stats['errors']}")

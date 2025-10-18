@@ -89,59 +89,54 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
         log.warning(f"Directory {dump_dir} does not exist")
         return stats
     
-    # Find all JSONL files, excluding schema files
-    jsonl_files = [f for f in Path(dump_dir).glob('*.jsonl') if 'schema' not in f.name.lower()]
+    # Find all JSON files, excluding schema files
+    json_files = [f for f in Path(dump_dir).glob('*.json') if 'schema' not in f.name.lower()]
     
     # Group records by (file_path, method_signature, phase)
     method_records: Dict[tuple, List[Dict[str, Any]]] = {}
     
-    # Process each JSONL file
-    for jsonl_file in jsonl_files:
+    # Process each JSON file
+    for json_file in json_files:
         try:
             if backup:
-                backup_path = str(jsonl_file) + '.backup'
-                os.rename(str(jsonl_file), backup_path)
+                backup_path = str(json_file) + '.backup'
+                os.rename(str(json_file), backup_path)
                 input_path = backup_path
             else:
-                input_path = str(jsonl_file)
+                input_path = str(json_file)
             
+            # Read JSON array
             with open(input_path, 'r', encoding='utf-8') as infile:
-                for line in infile:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    try:
-                        # Parse JSON line
-                        data = json.loads(line)
-                        
-                        # Remove MAX_DEPTH_REACHED entries
-                        cleaned_data = remove_max_depth_reached_recursive(data)
-                        
-                        # Extract method metadata
-                        method_signature = cleaned_data.get("method_signature", "unknown")
-                        file_path = cleaned_data.get("file_path", "unknown")
-                        phase = cleaned_data.get("phase")
-                        
-                        if phase in ("entry", "exit"):
-                            key = (file_path, method_signature, phase)
-                            if key not in method_records:
-                                method_records[key] = []
-                            method_records[key].append(cleaned_data)
-                            stats['total_lines_processed'] += 1
-                        
-                    except json.JSONDecodeError as e:
-                        log.warning(f"Skipping malformed JSON line in {jsonl_file}: {e}")
-                        continue
-                    except Exception as e:
-                        log.warning(f"Error processing line in {jsonl_file}: {e}")
-                        continue
+                data_array = json.load(infile)
             
-            # Write cleaned data back to original file
-            with open(str(jsonl_file), 'w', encoding='utf-8') as outfile:
-                for key, records in method_records.items():
-                    for record in records:
-                        outfile.write(json.dumps(record, ensure_ascii=False, indent=4, sort_keys=True) + '\n')
+            # Process each record in the array
+            cleaned_records = []
+            for data in data_array:
+                try:
+                    # Remove MAX_DEPTH_REACHED entries
+                    cleaned_data = remove_max_depth_reached_recursive(data)
+                    
+                    # Extract method metadata
+                    method_signature = cleaned_data.get("method_signature", "unknown")
+                    file_path = cleaned_data.get("file_path", "unknown")
+                    phase = cleaned_data.get("phase")
+                    
+                    if phase in ("entry", "exit"):
+                        key = (file_path, method_signature, phase)
+                        if key not in method_records:
+                            method_records[key] = []
+                        method_records[key].append(cleaned_data)
+                        stats['total_lines_processed'] += 1
+                    
+                    cleaned_records.append(cleaned_data)
+                    
+                except Exception as e:
+                    log.warning(f"Error processing record in {json_file}: {e}")
+                    continue
+            
+            # Write cleaned data back to original file as JSON array
+            with open(str(json_file), 'w', encoding='utf-8') as outfile:
+                json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
             
             stats['jsonl_files_processed'] += 1
             
@@ -196,37 +191,32 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
     return stats
 
 
-def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> int:
+def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> int:
     """
-    Process a JSONL file to remove MAX_DEPTH_REACHED entries.
+    Process a JSON file to remove MAX_DEPTH_REACHED entries.
     
     Args:
-        input_path: Path to input JSONL file
-        output_path: Path to output JSONL file
+        input_path: Path to input JSON file
+        output_path: Path to output JSON file
         
     Returns:
-        Number of lines processed
+        Number of records processed
     """
     processed_count = 0
     builders: Dict[str, Any] = {}
     
-    with open(input_path, 'r', encoding='utf-8') as infile, \
-         open(output_path, 'w', encoding='utf-8') as outfile:
+    try:
+        # Read JSON array
+        with open(input_path, 'r', encoding='utf-8') as infile:
+            data_array = json.load(infile)
         
-        for line in infile:
-            line = line.strip()
-            if not line:
-                continue
-                
+        # Process each record in the array
+        cleaned_records = []
+        for data in data_array:
             try:
-                # Parse JSON line
-                data = json.loads(line)
-                
                 # Remove MAX_DEPTH_REACHED entries
                 cleaned_data = remove_max_depth_reached_recursive(data)
-                
-                # Only write non-empty cleaned data
-                outfile.write(json.dumps(cleaned_data, ensure_ascii=False, indent=4, sort_keys=True) + '\n')
+                cleaned_records.append(cleaned_data)
                 processed_count += 1
 
                 # Feed schema builders by phase if requested
@@ -241,16 +231,23 @@ def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool =
                             # genson accepts dicts directly
                             builder.add_object(cleaned_data)
                 
-            except json.JSONDecodeError as e:
-                # Skip malformed JSON lines
-                log.warning(f"Skipping malformed JSON line: {e}")
-                continue
             except Exception as e:
-                # Skip lines that cause other errors
-                log.warning(f"processing line: {e}")
+                # Skip records that cause errors
+                log.warning(f"Error processing record: {e}")
                 continue
+        
+        # Write cleaned data as JSON array
+        with open(output_path, 'w', encoding='utf-8') as outfile:
+            json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
     
-    # Emit per-phase schemas next to the JSONL file
+    except json.JSONDecodeError as e:
+        log.error(f"Invalid JSON in {input_path}: {e}")
+        return 0
+    except Exception as e:
+        log.error(f"Error processing {input_path}: {e}")
+        return 0
+    
+    # Emit per-phase schemas next to the JSON file
     if emit_schema and builders:
         for phase, builder in builders.items():
             schema_obj = builder.to_schema()
@@ -259,9 +256,9 @@ def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool =
     return processed_count
 
 
-def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> bool:
+def process_single_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> bool:
     """
-    Process a JSON file to remove MAX_DEPTH_REACHED entries.
+    Process a single JSON file to remove MAX_DEPTH_REACHED entries.
     
     Args:
         input_path: Path to input JSON file
@@ -332,22 +329,21 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
         log.warning(f"Directory {dump_dir} does not exist")
         return stats
     
-    # Find all JSON and JSONL files, excluding schema files
-    jsonl_files = [f for f in Path(dump_dir).glob('*.jsonl') if 'schema' not in f.name.lower()]
+    # Find all JSON files, excluding schema files
     json_files = [f for f in Path(dump_dir).glob('*.json') if 'schema' not in f.name.lower()]
     
-    # Process JSONL files
-    for jsonl_file in jsonl_files:
+    # Process JSON files
+    for json_file in json_files:
         try:
             if backup:
-                backup_path = str(jsonl_file) + '.backup'
-                os.rename(str(jsonl_file), backup_path)
+                backup_path = str(json_file) + '.backup'
+                os.rename(str(json_file), backup_path)
                 input_path = backup_path
             else:
-                input_path = str(jsonl_file)
+                input_path = str(json_file)
             
             # Process the file
-            lines_processed = process_jsonl_file(input_path, str(jsonl_file), emit_schema=emit_schema)
+            lines_processed = process_json_file(input_path, str(json_file), emit_schema=emit_schema)
             stats['jsonl_files_processed'] += 1
             stats['total_lines_processed'] += lines_processed
             
@@ -356,7 +352,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
                 os.remove(input_path)
                 
         except Exception as e:
-            log.error(f"Error processing {jsonl_file}: {e}")
+            log.error(f"Error processing {json_file}: {e}")
             stats['errors'] += 1
     
     # Process JSON files
