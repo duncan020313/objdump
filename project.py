@@ -16,11 +16,12 @@ from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
 from instrumentation.instrumenter import instrument_changed_methods, copy_java_template_to_classdir
 from instrumentation.test_extractor import extract_test_methods
-from tree_sitter import Parser
-from tree_sitter_languages import get_language
 from objdump_io.net import download_files
 from collector import collect_dumps_safe
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+configure_logging()
+log = logging.getLogger(__name__)
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
     lib_dir = os.path.join(work_dir, "lib")
@@ -34,7 +35,6 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
 
 def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -> bool:
     """Verify Jackson jars are in project classpath and accessible."""
-    log = logging.getLogger("jackson_installer")
     lib_dir = os.path.join(work_dir, "lib")
     required_jars = [
         f"jackson-core-{jackson_version}.jar",
@@ -152,8 +152,7 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     Returns:
         tuple: (buggy_dir, fixed_dir)
     """
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+
 
     
     if os.path.exists(work_dir):
@@ -178,8 +177,6 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
 
 def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", skip_shared_build_injection: bool = False, project_id: Optional[str] = None) -> None:
     """Setup Jackson dependencies for the project."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
     
     # Inject Jackson into project template build files first
     if project_id:
@@ -222,8 +219,7 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", s
 
 def compile_project(work_dir: str) -> bool:
     """Compile the project and return success status."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+    
     
     # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
     out_file = os.path.join(work_dir, "dump.jsonl")
@@ -234,8 +230,7 @@ def compile_project(work_dir: str) -> bool:
 
 def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, List[Dict[str, Any]]]:
     """Instrument changed methods in the project."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+    
     
     modified_classes = (defects4j.export(work_dir, "classes.modified") or "").splitlines()
     modified_classes = [s for s in (c.strip() for c in modified_classes) if s]
@@ -266,8 +261,7 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, 
 
 def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, Any]]], work_dir: str, report_file: Optional[str] = None) -> None:
     """Generate instrumentation report."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+    
     
     report_items: List[Dict[str, Any]] = []
     for fpath, method_infos in instrumented_map.items():
@@ -308,9 +302,6 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     Returns:
         Dictionary mapping test names to their status ("correct" for passing, "wrong" for failing)
     """
-    configure_logging()
-    log = logging.getLogger("test_runner")
-    
     # Prepare dumps directory for per-test outputs
     dumps_dir = os.path.join(work_dir, "dumps")
     os.makedirs(dumps_dir, exist_ok=True)
@@ -346,11 +337,23 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     
     log.info(f"Correct tests: {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
+    
+    def run_test_wrapper(args):
+        test_name, is_correct = args
+        return run_test(test_name, is_correct)
+    
+    # Prepare all test tasks
+    test_tasks = []
     for test_name in correct_tests:
-        run_test(test_name, True)
-
+        test_tasks.append((test_name, True))
     for test_name in trigger_set:
-        run_test(test_name, False)
+        test_tasks.append((test_name, False))
+    
+    # Run tests in parallel
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = [executor.submit(run_test_wrapper, task) for task in test_tasks]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle any exceptions
     return test_results
 
 
@@ -406,8 +409,7 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
 
 def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results: Optional[Dict[str, str]] = None) -> Optional[str]:
     """Collect dump files after test execution."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+    
     
     # Use centralized location from environment variable or default
     output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
@@ -422,8 +424,7 @@ def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results
 
 def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None) -> None:
     """Run the complete workflow using step functions."""
-    configure_logging()
-    log = logging.getLogger("jackson_installer")
+    
 
     # Step 1: Checkout buggy and fixed versions
     buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
@@ -490,7 +491,6 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     }
     
     # Post-compile Jackson re-injection for newly generated build files
-    log = logging.getLogger("run_all_staged")
     try:
         inject_jackson_into_all_build_files(work_dir, jackson_version)
         # Re-validate Jackson classpath after re-injection
