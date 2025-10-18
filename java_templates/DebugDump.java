@@ -34,7 +34,14 @@ public final class DebugDump {
             } else if (value instanceof String) {
                 gen.writeString((String) value);
             } else if (value instanceof Number) {
-                gen.writeNumber(value.toString());
+                // Check for NaN and Infinity, convert to null
+                if (value instanceof Double && (Double.isNaN((Double) value) || Double.isInfinite((Double) value))) {
+                    gen.writeNull();
+                } else if (value instanceof Float && (Float.isNaN((Float) value) || Float.isInfinite((Float) value))) {
+                    gen.writeNull();
+                } else {
+                    gen.writeNumber(value.toString());
+                }
             } else if (value instanceof Boolean) {
                 gen.writeBoolean((Boolean) value);
             } else if (value instanceof Map) {
