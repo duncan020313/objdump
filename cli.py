@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Set, Tuple
 from reports import write_jsonl, write_markdown_table
 from build_systems import inject_jackson_into_defects4j_shared_build
 from reports import write_summary_statistics, write_detailed_errors
+from tqdm import tqdm
 
 from project import run_all, run_all_staged
 import defects4j
@@ -147,35 +148,69 @@ def main() -> None:
         log.info("Jackson injection completed for all projects")
 
         results: List[Dict[str, Any]] = []
+        
+        # Calculate total number of bugs to process
+        total_bugs = 0
+        bug_tasks = []  # List of (project, bug_id) tuples
+        
+        for proj in projects:
+            # Use valid bugs if available, otherwise fall back to all bugs
+            if proj in valid_bugs:
+                ids = sorted(list(valid_bugs[proj]))
+                log.info(f"Using {len(ids)} valid bugs for {proj}")
+            else:
+                ids = defects4j.list_bug_ids(proj)
+                log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
+            
+            if args.max_bugs_per_project > 0:
+                ids = ids[: args.max_bugs_per_project]
+                log.info(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
+            
+            for bug_id in ids:
+                bug_tasks.append((proj, bug_id))
+                total_bugs += 1
 
         def job(proj: str, bug_id: int) -> Dict[str, Any]:
             work_dir = os.path.join(args.work_base, f"{proj.lower()}-{bug_id}")
             return run_all_staged(proj, str(bug_id), work_dir, args.jackson_version, skip_shared_build_injection=True)
 
+        # Create progress bar with position=0 to keep it at the top
+        # Use dynamic_ncols=True to adapt to terminal width
+        progress_bar = tqdm(
+            total=total_bugs,
+            desc="Processing bugs",
+            unit="bug",
+            position=0,
+            leave=True,
+            dynamic_ncols=True,
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+            colour='green',
+            file=sys.stdout
+        )
+
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
             futures = []
-            for proj in projects:
-                # Use valid bugs if available, otherwise fall back to all bugs
-                if proj in valid_bugs:
-                    ids = sorted(list(valid_bugs[proj]))
-                    log.info(f"Using {len(ids)} valid bugs for {proj}")
-                else:
-                    ids = defects4j.list_bug_ids(proj)
-                    log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
-                
-                if args.max_bugs_per_project > 0:
-                    ids = ids[: args.max_bugs_per_project]
-                    log.info(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
-                
-                for bug_id in ids:
-                    futures.append(ex.submit(job, proj, bug_id))
+            for proj, bug_id in bug_tasks:
+                futures.append(ex.submit(job, proj, bug_id))
+            
             for fut in as_completed(futures):
                 try:
                     res = fut.result()
                 except Exception as e:
                     res = {"project": "?", "bug_id": "?", "stages": {}, "error": str(e)}
                 results.append(res)
-
+                progress_bar.update(1)
+                
+                # Update progress bar description with current status
+                completed = len(results)
+                progress_bar.set_description(f"Processing bugs ({completed}/{total_bugs})")
+        
+        progress_bar.close()
+        
+        # Log completion summary
+        successful = len([r for r in results if 'error' not in r])
+        failed = len([r for r in results if 'error' in r])
+        log.info(f"Matrix processing completed: {successful} successful, {failed} failed out of {total_bugs} total bugs")
 
         base = args.reports_basename.strip() or f"defects4j_matrix_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         jsonl_path = os.path.join(args.reports_dir, f"{base}.jsonl")

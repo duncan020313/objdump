@@ -1,5 +1,6 @@
 import logging
 import os
+from tqdm import tqdm
 
 
 class ColoredFormatter(logging.Formatter):
@@ -29,6 +30,17 @@ class ColoredFormatter(logging.Formatter):
         return log_message
 
 
+class TqdmLogHandler(logging.StreamHandler):
+    """Custom handler that redirects log output to tqdm.write."""
+    
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg)
+        except Exception:
+            self.handleError(record)
+
+
 def configure_logging() -> None:
     """Configure root logger for structured, concise output with colored log levels.
 
@@ -36,8 +48,8 @@ def configure_logging() -> None:
     """
     level = logging.DEBUG if os.getenv("JI_DEBUG") else logging.INFO
     
-    # Create a custom handler with colored formatter
-    handler = logging.StreamHandler()
+    # Create a custom handler with colored formatter that uses tqdm.write
+    handler = TqdmLogHandler()
     formatter = ColoredFormatter("%(levelname)s %(name)s:%(lineno)d: %(message)s")
     handler.setFormatter(formatter)
     
