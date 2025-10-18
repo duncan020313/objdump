@@ -6,8 +6,9 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
 from typing import List, Dict, Any, Set, Tuple
-from reports import write_jsonl, write_markdown_table, append_readme_summary
+from reports import write_jsonl, write_markdown_table
 from build_systems import inject_jackson_into_defects4j_shared_build
+from reports import write_summary_statistics, write_detailed_errors
 
 from project import run_all, run_all_staged
 import defects4j
@@ -148,10 +149,8 @@ def main() -> None:
         
         write_jsonl(jsonl_path, results)
         write_markdown_table(md_path, results, args.dumps_dir)
-        append_readme_summary("README.md", results, args.dumps_dir)
         
         # Write additional reports
-        from reports import write_summary_statistics, write_detailed_errors
         write_summary_statistics(summary_path, results, args.dumps_dir)
         write_detailed_errors(errors_path, results, args.dumps_dir)
     

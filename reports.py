@@ -126,38 +126,6 @@ def write_markdown_table(path: str, rows: List[Dict[str, Any]], dumps_base_dir: 
         f.writelines(lines)
 
 
-def append_readme_summary(readme_path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    intro = f"\n\n### Defects4J Activated Bugs Matrix (latest run: {timestamp})\n\n"
-    table_lines: List[str] = []
-    header = (
-        "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests | Dumps |\n"
-        "|--------:|----:|:--------:|:-------:|:-------:|:----------:|:-------:|:-----:|:-----:|\n"
-    )
-    table_lines.append(header)
-    for r in sorted(rows, key=lambda x: (str(x.get("project")), int(x.get("bug_id", 0)) if str(x.get("bug_id", "0")).isdigit() else 0))[:50]:
-        stages = r.get("stages", {})
-        project = r.get('project', '?')
-        bug_id = r.get('bug_id', '?')
-        dump_cell = _dump_collection_cell(project, bug_id, dumps_base_dir)
-        line = (
-            f"| {project} | {bug_id} | "
-            f"{_stage_cell(stages,'checkout')} | {_stage_cell(stages,'jackson')} | {_stage_cell(stages,'compile')} | {_stage_cell(stages,'instrument')} | {_stage_cell(stages,'rebuild')} | {_stage_cell(stages,'tests')} | {dump_cell} |\n"
-        )
-        table_lines.append(line)
-
-    try:
-        with open(readme_path, "a", encoding="utf-8") as f:
-            f.write(intro)
-            f.writelines(table_lines)
-    except FileNotFoundError:
-        # If README missing, create it with the table
-        with open(readme_path, "w", encoding="utf-8") as f:
-            f.write("# objdump\n")
-            f.write(intro)
-            f.writelines(table_lines)
-
-
 def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
     """Write summary statistics report to file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
