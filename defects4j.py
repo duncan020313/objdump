@@ -22,12 +22,12 @@ def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, 
     return True, res.out or "", res.err or ""
 
 
-def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None) -> bool:
+def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 30) -> bool:
     log = logging.getLogger("defects4j")
     if tests:
         all_ok = True
         for entry in tests:
-            res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env)
+            res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env, timeout=timeout)
             if res.code != 0:
                 all_ok = False
                 log.debug(f"[defects4j test] failed for {entry}")
@@ -37,7 +37,7 @@ def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[st
                     log.debug(f"stderr: {res.err}")
         return all_ok
     else:
-        res = run(["defects4j", "test"], cwd=work_dir, env=env)
+        res = run(["defects4j", "test"], cwd=work_dir, env=env, timeout=timeout)
         if res.code != 0:
             log.debug("[defects4j test] failed")
             if res.out:
