@@ -16,6 +16,53 @@ def _get_relative_path(file_path: str, target_dir: str) -> str:
     return os.path.relpath(file_path, target_dir)
 
 
+def _create_nested_structure(relative_path: str, content: Any) -> Dict[str, Any]:
+    """
+    Create nested structure from path components.
+    
+    Args:
+        relative_path: Relative path from target directory
+        content: JSON content to store at the end of the path
+        
+    Returns:
+        Nested dictionary structure
+    """
+    # Split path into components
+    path_parts = relative_path.split(os.sep)
+    
+    # Create nested structure
+    result = {}
+    current = result
+    
+    # Navigate through path components, creating nested dicts
+    for part in path_parts[:-1]:  # All parts except the last one
+        if part not in current:
+            current[part] = {}
+        current = current[part]
+    
+    # Set the content at the final level
+    current[path_parts[-1]] = content
+    
+    return result
+
+
+def _merge_nested_dict(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """
+    Recursively merge source dictionary into target dictionary.
+    
+    Args:
+        target: Target dictionary to merge into
+        source: Source dictionary to merge from
+    """
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            # Both are dictionaries, merge recursively
+            _merge_nested_dict(target[key], value)
+        else:
+            # Replace or add the value
+            target[key] = value
+
+
 def _process_json_file(file_path: str, target_dir: str) -> Tuple[str, Any, bool]:
     """
     Process a single JSON file.
@@ -38,63 +85,29 @@ def _process_json_file(file_path: str, target_dir: str) -> Tuple[str, Any, bool]
         return "", None, False
 
 
-def _process_jsonl_file(file_path: str, target_dir: str) -> Tuple[str, List[Any], bool]:
+def _find_json_files(target_dir: str) -> List[str]:
     """
-    Process a single JSONL file.
+    Find all JSON files in the target directory recursively.
     
     Returns:
-        Tuple of (relative_path, content_array, success)
-    """
-    try:
-        content_array = []
-        
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                try:
-                    obj = json.loads(line)
-                    content_array.append(obj)
-                except json.JSONDecodeError as e:
-                    log.warning(f"Invalid JSON on line {line_num} in {file_path}: {e}")
-                    continue
-        
-        relative_path = _get_relative_path(file_path, target_dir)
-        return relative_path, content_array, True
-        
-    except Exception as e:
-        log.warning(f"Error reading {file_path}: {e}")
-        return "", [], False
-
-
-def _find_json_files(target_dir: str) -> Tuple[List[str], List[str]]:
-    """
-    Find all JSON and JSONL files in the target directory recursively.
-    
-    Returns:
-        Tuple of (json_files, jsonl_files)
+        List of JSON file paths
     """
     json_files = []
-    jsonl_files = []
     
     for root, dirs, files in os.walk(target_dir):
         for file in files:
             if file.endswith('.json'):
                 json_files.append(os.path.join(root, file))
-            elif file.endswith('.jsonl'):
-                jsonl_files.append(os.path.join(root, file))
     
-    return json_files, jsonl_files
+    return json_files
 
 
 def merge_json_files(target_dir: str, output_path: str) -> Dict[str, Any]:
     """
-    Merge all JSON and JSONL files from a directory tree into a single JSON file.
+    Merge all JSON files from a directory tree into a single JSON file.
     
     Args:
-        target_dir: Directory to scan for JSON/JSONL files
+        target_dir: Directory to scan for JSON files
         output_path: Output JSON file path
         
     Returns:
@@ -108,17 +121,16 @@ def merge_json_files(target_dir: str, output_path: str) -> Dict[str, Any]:
     
     log.info(f"Scanning directory: {target_dir}")
     
-    # Find all JSON and JSONL files
-    json_files, jsonl_files = _find_json_files(target_dir)
+    # Find all JSON files
+    json_files = _find_json_files(target_dir)
     
-    log.info(f"Found {len(json_files)} JSON files and {len(jsonl_files)} JSONL files")
+    log.info(f"Found {len(json_files)} JSON files")
     
     # Process files
     merged_data = {}
     stats = {
         "files_processed": 0,
         "json_count": 0,
-        "jsonl_count": 0,
         "errors": 0,
         "output_size": 0
     }
@@ -129,19 +141,12 @@ def merge_json_files(target_dir: str, output_path: str) -> Dict[str, Any]:
         stats["files_processed"] += 1
         
         if success:
-            merged_data[relative_path] = content
+            # Create nested structure from path
+            nested_structure = _create_nested_structure(relative_path, content)
+            
+            # Merge nested structure into merged_data
+            _merge_nested_dict(merged_data, nested_structure)
             stats["json_count"] += 1
-        else:
-            stats["errors"] += 1
-    
-    # Process JSONL files
-    for file_path in jsonl_files:
-        relative_path, content_array, success = _process_jsonl_file(file_path, target_dir)
-        stats["files_processed"] += 1
-        
-        if success:
-            merged_data[relative_path] = content_array
-            stats["jsonl_count"] += 1
         else:
             stats["errors"] += 1
     
@@ -156,7 +161,7 @@ def merge_json_files(target_dir: str, output_path: str) -> Dict[str, Any]:
     # Get output file size
     stats["output_size"] = os.path.getsize(output_path)
     
-    log.info(f"Merged {stats['json_count']} JSON files and {stats['jsonl_count']} JSONL files")
+    log.info(f"Merged {stats['json_count']} JSON files")
     log.info(f"Output written to: {output_path} ({stats['output_size']:,} bytes)")
     
     if stats["errors"] > 0:
