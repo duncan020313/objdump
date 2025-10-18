@@ -1,7 +1,7 @@
 import argparse
 import os
 import csv
-import json
+import io
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
@@ -87,6 +87,7 @@ def main() -> None:
     p_classify.add_argument("--output-md", help="Output markdown table file path")
     p_classify.add_argument("--project", help="Single project ID (for backward compatibility)")
     p_classify.add_argument("--bug", help="Single bug ID (for backward compatibility)")
+    p_classify.add_argument("--filter-functional", action="store_true", help="Filter functional bugs")
 
     args = parser.parse_args()
 
@@ -182,21 +183,26 @@ def main() -> None:
             if not bug_info:
                 print(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
                 return
-            
-            # Format output as text for single bug
-            output = classification.format_single_bug_output(bug_info)
-            
-            # Output to file or stdout
-            if args.output:
-                with open(args.output, 'w') as f:
-                    f.write(output)
-                print(f"Classification saved to {args.output}")
-            else:
-                print(output)
-        
         else:
-            # Handle batch classification
-            projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
+            projects = [
+                "Chart",
+                "Cli",
+                "Closure",
+                "Codec",
+                "Collections",
+                "Compress",
+                "Csv",
+                "Gson",
+                "JacksonCore",
+                "JacksonDatabind",
+                "JacksonXml",
+                "Jsoup",
+                "JxPath",
+                "Lang",
+                "Math",
+                "Mockito",
+                "Time"
+            ]
             
             print(f"Classifying bugs for projects: {', '.join(projects)}")
             print(f"Using {args.workers} parallel workers")
@@ -204,31 +210,22 @@ def main() -> None:
             # Use the classification module
             all_results = classification.classify_projects(projects, args.max_bugs_per_project, args.workers)
             
-            # Write outputs
-            if args.output:
-                classification.write_classification_csv(args.output, all_results)
-                print(f"CSV results saved to {args.output}")
+        if args.filter_functional:
+            all_results = classification.filter_functional_bugs(all_results)
+            print(f"Filtered to {len(all_results)} functional bugs")
             
-            if args.output_md:
-                classification.write_classification_markdown(args.output_md, all_results)
-                print(f"Markdown results saved to {args.output_md}")
-            
-            if not args.output and not args.output_md:
-                # Write to stdout as CSV
-                import sys
-                import io
-                
-                # Create a string buffer to capture CSV output
-                output_buffer = io.StringIO()
-                classification.write_classification_csv(output_buffer, all_results)
-                csv_content = output_buffer.getvalue()
-                output_buffer.close()
-                
-                print(csv_content)
-            
-            print(f"Total bugs classified: {len(all_results)}")
+        # Write outputs
+        if args.output:
+            classification.write_classification_csv(args.output, all_results)
+            print(f"CSV results saved to {args.output}")
+        
+        if args.output_md:
+            classification.write_classification_markdown(args.output_md, all_results)
+            print(f"Markdown results saved to {args.output_md}")
+        
+        print(f"Total bugs classified: {len(all_results)}")
 
-
+        
 if __name__ == "__main__":
     main()
 

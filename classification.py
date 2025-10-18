@@ -255,3 +255,15 @@ def format_single_bug_output(bug_info: Dict[str, Any]) -> str:
             output_lines.append(f"  - {source}")
     
     return "\n".join(output_lines)
+
+
+def filter_functional_bugs(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter functional bugs from classification results.
+    
+    Args:
+        results: List of classification results
+        
+    Returns:
+        List of functional bugs
+    """
+    return [r for r in results if r.get("type") == "functional"]
