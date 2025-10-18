@@ -7,7 +7,8 @@ based on their root cause error types.
 from typing import List, Dict, Any
 import csv
 import defects4j
-
+import logging
+log = logging.getLogger(__name__)
 
 def classify_bugs_batch(project_id: str, bug_ids: List[int], max_workers: int = 4) -> List[Dict[str, Any]]:
     """Classify multiple bugs for a project in parallel.
@@ -197,14 +198,14 @@ def classify_projects(projects: List[str], max_bugs_per_project: int, workers: i
     def classify_project_bugs(project: str) -> List[Dict[str, Any]]:
         # Get all available bugs for the project
         bug_ids = defects4j.list_bug_ids(project)
-        print(f"Processing {len(bug_ids)} bugs for {project}")
+        log.info(f"Processing {len(bug_ids)} bugs for {project}")
         
         if max_bugs_per_project > 0:
             bug_ids = bug_ids[:max_bugs_per_project]
-            print(f"Limited to {len(bug_ids)} bugs for {project} (max: {max_bugs_per_project})")
+            log.info(f"Limited to {len(bug_ids)} bugs for {project} (max: {max_bugs_per_project})")
         
         if not bug_ids:
-            print(f"No bugs found for {project}")
+            log.warning(f"No bugs found for {project}")
             return []
         
         return classify_bugs_batch(project, bug_ids, workers)
@@ -218,7 +219,7 @@ def classify_projects(projects: List[str], max_bugs_per_project: int, workers: i
                 results = future.result()
                 all_results.extend(results)
             except Exception as e:
-                print(f"Error processing project: {e}")
+                log.error(f"Error processing project: {e}")
     
     # Sort results by project and bug_id
     all_results.sort(key=lambda x: (x.get("project", ""), int(x.get("bug_id", 0))))

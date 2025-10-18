@@ -3,9 +3,10 @@ from typing import Optional, List
 import glob
 import os
 import xml.etree.ElementTree as ET
-
+import logging
 from jt_types import BuildSystem
 
+log = logging.getLogger(__name__)
 
 def detect(project_dir: str) -> Optional[BuildSystem]:
     """Detect build system based on presence of build files.
@@ -90,7 +91,7 @@ def fix_encoding_in_build_files(work_dir: str) -> None:
                 
         except Exception as e:
             # Log error but continue with other files
-            print(f"Warning: Failed to fix encoding in {build_file}: {e}")
+            log.warning(f"Failed to fix encoding in {build_file}: {e}")
             continue
 
 
@@ -120,7 +121,7 @@ def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2
                 
         except Exception as e:
             # Log error but continue with other files
-            print(f"Warning: Failed to inject Jackson into {build_file}: {e}")
+            log.warning(f"Failed to inject Jackson into {build_file}: {e}")
             continue
 
 
@@ -143,12 +144,12 @@ def inject_jackson_into_project_templates(project_ids: List[str], jackson_versio
     failed_count = 0
     
     for project_id in project_ids:
-        print(f"Processing project template for {project_id}...")
+        log.info(f"Processing project template for {project_id}...")
         
         # Get the project's build file path using defects4j info
         build_file_path = get_project_build_file(project_id)
         if not build_file_path:
-            print(f"Warning: Could not get build file path for project {project_id}")
+            log.warning(f"Could not get build file path for project {project_id}")
             failed_count += 1
             continue
         
@@ -163,10 +164,10 @@ def inject_jackson_into_project_templates(project_ids: List[str], jackson_versio
             else:
                 failed_count += 1
     
-    print(f"Project template injection completed:")
-    print(f"  - Modified: {modified_count}")
-    print(f"  - Skipped (already present): {skipped_count}")
-    print(f"  - Failed: {failed_count}")
+    log.info(f"Project template injection completed:")
+    log.info(f"  - Modified: {modified_count}")
+    log.info(f"  - Skipped (already present): {skipped_count}")
+    log.info(f"  - Failed: {failed_count}")
 
 
 def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") -> None:

@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import logging  
 
+log = logging.getLogger(__name__)       
 
 def get_instrumenter_jar_path() -> str:
     """Get the path to the Java instrumenter JAR"""
@@ -34,11 +36,11 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
     - code: original method source code
     """
     if not target_signatures:
-        print(f"No target signatures for {java_file}")
+        log.warning(f"No target signatures for {java_file}")
         return []
     
     if not os.path.exists(java_file):
-        print(f"Java file not found: {java_file}")
+        log.warning(f"Java file not found: {java_file}")
         return []
     
     # Normalize target signatures to remove 'final' modifiers
@@ -60,11 +62,11 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
         
         if result.returncode:
             # Instrumentation failed
-            print(f"Instrumentation failed for {java_file}. Return code: {result.returncode}")
+            log.error(f"Instrumentation failed for {java_file}. Return code: {result.returncode}")
             if result.stderr:
-                print(f"Error output: {result.stderr}")
+                log.error(f"Error output: {result.stderr}")
             if result.stdout:
-                print(f"Standard output: {result.stdout}")
+                log.error(f"Standard output: {result.stdout}")
             return []
         
         # Parse JSON output
@@ -94,7 +96,7 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
         
     except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, FileNotFoundError) as e:
         # On any error, return empty list
-        print(f"Error instrumenting {java_file}: {e}")
+        log.error(f"Error instrumenting {java_file}: {e}")
         return []
 
 
@@ -102,7 +104,7 @@ def instrument_changed_methods(changed_methods: Dict[str, List[str]]) -> Dict[st
     """Instrument methods per file and return mapping of file -> method info (signature, javadoc, code)."""
     result: Dict[str, List[Dict[str, Any]]] = {}
     for fpath, sigs in changed_methods.items():
-        print(f"Instrumenting {fpath} with {sigs}")
+        log.info(f"Instrumenting {fpath} with {sigs}")
         instrumented = instrument_java_file(fpath, sigs)
         if instrumented:
             result[fpath] = instrumented

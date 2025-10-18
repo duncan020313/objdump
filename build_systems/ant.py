@@ -1,7 +1,8 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import os
-
+import logging
+log = logging.getLogger(__name__)
 
 def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0", class_dir: str = "src/main/java") -> None:
     """Add Jackson dependencies to individual project build.xml files.
@@ -11,6 +12,7 @@ def add_dependencies(build_xml_path: str, jackson_version: str = "2.13.0", class
     """
     p = Path(build_xml_path)
     if not p.is_file():
+        log.error(f"build.xml not found: {build_xml_path}")
         raise FileNotFoundError(f"build.xml not found: {build_xml_path}")
 
     tree = ET.parse(build_xml_path)
@@ -82,7 +84,7 @@ def add_dependencies_to_all_ant_files(work_dir: str, jackson_version: str = "2.1
             add_dependencies(build_file, jackson_version, class_dir)
         except Exception as e:
             # Log error but continue with other files
-            print(f"Warning: Failed to modify {build_file}: {e}")
+            log.warning(f"Failed to modify {build_file}: {e}")
             continue
 
 
@@ -96,14 +98,14 @@ def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") 
     shared_build_file = "/defects4j/framework/projects/defects4j.build.xml"
     
     if not os.path.exists(shared_build_file):
-        print(f"Warning: Shared build file not found: {shared_build_file}")
+        log.warning(f"Shared build file not found: {shared_build_file}")
         return
     
     try:
         _inject_jackson_into_shared_build_file(shared_build_file, jackson_version)
-        print(f"Successfully updated Jackson dependencies in {shared_build_file}")
+        log.info(f"Successfully updated Jackson dependencies in {shared_build_file}")
     except Exception as e:
-        print(f"Warning: Failed to inject Jackson into shared build file: {e}")
+        log.warning(f"Failed to inject Jackson into shared build file: {e}")
 
 
 def add_dependencies_to_project_template(build_file_path: str, jackson_version: str = "2.13.0") -> bool:
@@ -120,7 +122,7 @@ def add_dependencies_to_project_template(build_file_path: str, jackson_version: 
         True if modifications were made, False if already present or failed
     """
     if not os.path.exists(build_file_path):
-        print(f"Warning: Project build file not found: {build_file_path}")
+        log.warning(f"Project build file not found: {build_file_path}")
         return False
     
     try:
@@ -208,11 +210,11 @@ def add_dependencies_to_project_template(build_file_path: str, jackson_version: 
         
         # Write the modified file
         tree.write(build_file_path, encoding='utf-8', xml_declaration=True)
-        print(f"Successfully added Jackson dependencies to {build_file_path}")
+        log.info(f"Successfully added Jackson dependencies to {build_file_path}")
         return True
         
     except Exception as e:
-        print(f"Error modifying project build file {build_file_path}: {e}")
+        log.error(f"Error modifying project build file {build_file_path}: {e}")
         return False
 
 
@@ -223,7 +225,7 @@ def _inject_jackson_into_shared_build_file(build_file: str, jackson_version: str
     this function just verifies they exist and skips if they do.
     """
     if not os.path.exists(build_file):
-        print(f"Warning: Build file not found: {build_file}")
+        log.warning(f"Build file not found: {build_file}")
         return
     
     tree = ET.parse(build_file)
@@ -267,6 +269,6 @@ def _inject_jackson_into_shared_build_file(build_file: str, jackson_version: str
     if existing_props and jackson_path_exists and jackson_integrated:
         return
     
-    print(f"Jackson dependencies not fully integrated in {build_file}, manual update may be needed")
+    log.warning(f"Jackson dependencies not fully integrated in {build_file}, manual update may be needed")
 
 

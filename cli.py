@@ -15,7 +15,7 @@ from reports import write_summary_statistics, write_detailed_errors
 from project import run_all, run_all_staged
 import defects4j
 import classification
-
+from logging_setup import configure_logging
 
 def build_java_instrumenter() -> bool:
     """Build the Java instrumenter using Maven.
@@ -30,8 +30,7 @@ def build_java_instrumenter() -> bool:
     result = subprocess.run(
         ["mvn", "clean", "package", "-q"],
         cwd=instrumenter_dir,
-        capture_output=True,
-        text=True
+        capture_output=False,
     )
     
     if result.returncode != 0:
@@ -119,7 +118,7 @@ def main() -> None:
 
     args = parser.parse_args()
     
-    logging.configure_logging()
+    configure_logging()
     log = logging.getLogger("cli")
     
     if not build_java_instrumenter():

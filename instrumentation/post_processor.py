@@ -1,9 +1,15 @@
 import json
+import argparse
+import logging
+from logging_setup import configure_logging
 import os
 import re
 from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
 from genson import SchemaBuilder
+
+configure_logging()
+log = logging.getLogger("post_process_dump_files")
 
 def remove_max_depth_reached_recursive(data: Any) -> Any:
     """
@@ -80,7 +86,7 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
     }
     
     if not os.path.exists(dump_dir):
-        print(f"Warning: Directory {dump_dir} does not exist")
+        log.warning(f"Directory {dump_dir} does not exist")
         return stats
     
     # Find all JSONL files, excluding schema files
@@ -125,10 +131,10 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
                             stats['total_lines_processed'] += 1
                         
                     except json.JSONDecodeError as e:
-                        print(f"Warning: Skipping malformed JSON line in {jsonl_file}: {e}")
+                        log.warning(f"Skipping malformed JSON line in {jsonl_file}: {e}")
                         continue
                     except Exception as e:
-                        print(f"Warning: Error processing line in {jsonl_file}: {e}")
+                        log.warning(f"Error processing line in {jsonl_file}: {e}")
                         continue
             
             # Write cleaned data back to original file
@@ -144,7 +150,7 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
                 os.remove(input_path)
                 
         except Exception as e:
-            print(f"Error processing {jsonl_file}: {e}")
+            log.error(f"Error processing {jsonl_file}: {e}")
             stats['errors'] += 1
     
     # Generate schemas for each method
@@ -184,7 +190,7 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
             stats['methods_processed'] += 1
             
         except Exception as e:
-            print(f"Error generating schema for {file_path}::{method_signature}: {e}")
+            log.error(f"Error generating schema for {file_path}::{method_signature}: {e}")
             stats['errors'] += 1
     
     return stats
@@ -203,7 +209,6 @@ def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool =
     """
     processed_count = 0
     builders: Dict[str, Any] = {}
-    genson_unavailable_warned = False
     
     with open(input_path, 'r', encoding='utf-8') as infile, \
          open(output_path, 'w', encoding='utf-8') as outfile:
@@ -238,11 +243,11 @@ def process_jsonl_file(input_path: str, output_path: str, *, emit_schema: bool =
                 
             except json.JSONDecodeError as e:
                 # Skip malformed JSON lines
-                print(f"Warning: Skipping malformed JSON line: {e}")
+                log.warning(f"Skipping malformed JSON line: {e}")
                 continue
             except Exception as e:
                 # Skip lines that cause other errors
-                print(f"Warning: Error processing line: {e}")
+                log.warning(f"processing line: {e}")
                 continue
     
     # Emit per-phase schemas next to the JSONL file
@@ -291,10 +296,10 @@ def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = 
         return True
         
     except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON in {input_path}: {e}")
+        log.error(f"Error: Invalid JSON in {input_path}: {e}")
         return False
     except Exception as e:
-        print(f"Error processing {input_path}: {e}")
+        log.error(f"Error processing {input_path}: {e}")
         return False
 
 
@@ -324,7 +329,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
     }
     
     if not os.path.exists(dump_dir):
-        print(f"Warning: Directory {dump_dir} does not exist")
+        log.warning(f"Directory {dump_dir} does not exist")
         return stats
     
     # Find all JSON and JSONL files, excluding schema files
@@ -351,7 +356,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
                 os.remove(input_path)
                 
         except Exception as e:
-            print(f"Error processing {jsonl_file}: {e}")
+            log.error(f"Error processing {jsonl_file}: {e}")
             stats['errors'] += 1
     
     # Process JSON files
@@ -373,7 +378,7 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
                 os.remove(input_path)
                 
         except Exception as e:
-            print(f"Error processing {json_file}: {e}")
+            log.error(f"Error processing {json_file}: {e}")
             stats['errors'] += 1
     
     return stats
@@ -381,8 +386,6 @@ def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: 
 
 def main():
     """Command line interface for post-processing dump files."""
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Post-process JSON dump files to remove MAX_DEPTH_REACHED entries and optionally emit JSON Schemas')
     parser.add_argument('dump_dir', help='Directory containing dump files')
     parser.add_argument('--no-backup', action='store_true', help='Do not create backup files')
@@ -391,10 +394,10 @@ def main():
     args = parser.parse_args()
     
     if not os.path.exists(args.dump_dir):
-        print(f"Error: Directory {args.dump_dir} does not exist")
+        log.error(f"Error: Directory {args.dump_dir} does not exist")
         return 1
     
-    print(f"Post-processing dump files in {args.dump_dir}")
+    log.info(f"Post-processing dump files in {args.dump_dir}")
     stats = post_process_dump_files(
         args.dump_dir,
         backup=not args.no_backup,
@@ -402,20 +405,20 @@ def main():
     )
     
     if args.verbose:
-        print(f"Processing complete:")
+        log.info(f"Processing complete:")
         if 'methods_processed' in stats:
             # Method-level processing stats
-            print(f"  JSONL files processed: {stats['jsonl_files_processed']}")
-            print(f"  Total lines processed: {stats['total_lines_processed']}")
-            print(f"  Methods processed: {stats['methods_processed']}")
-            print(f"  Schemas generated: {stats['schemas_generated']}")
-            print(f"  Errors: {stats['errors']}")
+            log.info(f"  JSONL files processed: {stats['jsonl_files_processed']}")
+            log.info(f"  Total lines processed: {stats['total_lines_processed']}")
+            log.info(f"  Methods processed: {stats['methods_processed']}")
+            log.info(f"  Schemas generated: {stats['schemas_generated']}")
+            log.info(f"  Errors: {stats['errors']}")
         else:
             # Original per-file processing stats
-            print(f"  JSONL files processed: {stats['jsonl_files_processed']}")
-            print(f"  JSON files processed: {stats['json_files_processed']}")
-            print(f"  Total lines processed: {stats['total_lines_processed']}")
-            print(f"  Errors: {stats['errors']}")
+            log.info(f"  JSONL files processed: {stats['jsonl_files_processed']}")
+            log.info(f"  JSON files processed: {stats['json_files_processed']}")
+            log.info(f"  Total lines processed: {stats['total_lines_processed']}")
+            log.info(f"  Errors: {stats['errors']}")
     
     return 0 if stats['errors'] == 0 else 1
 
