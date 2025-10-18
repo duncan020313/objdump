@@ -130,3 +130,6 @@ dmypy.json
 
 # reports
 reports/
+
+# data
+*.json
