@@ -49,6 +49,20 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven JAR Plugin - ensure main JAR also has manifest -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>org.objdump.instrumenter.Main</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
             <!-- Maven Shade Plugin for standalone JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -77,6 +91,7 @@
                                 </filter>
                             </filters>
                             <finalName>instrumenter</finalName>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
                         </configuration>
                     </execution>
                 </executions>
