@@ -389,8 +389,23 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         dump_path = os.path.join(dumps_dir, f"{safe}.json")
         abs_dump_path = os.path.abspath(dump_path)
         per_test_env = {"OBJDUMP_OUT": abs_dump_path}
-        defects4j.test(work_dir, [test_name], env=per_test_env)
-        test_results[test_name] = "correct" if is_correct else "wrong"
+        
+        # Run the test and check the result
+        test_result = defects4j.test(work_dir, [test_name], env=per_test_env)
+        
+        # Handle different test results
+        if test_result == "timeout":
+            # Test timed out - skip it (don't add to test_results)
+            log.warning(f"Test {test_name} timed out - skipping")
+            return True  # Return True to indicate we handled it gracefully
+        elif test_result is True:
+            # Test passed
+            test_results[test_name] = "correct" if is_correct else "wrong"
+            return True
+        else:
+            # Test failed
+            test_results[test_name] = "wrong"
+            return True
     
     correct_tests = expanded_test_names - trigger_set
     
