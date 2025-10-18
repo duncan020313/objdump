@@ -30,20 +30,20 @@ def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[st
             res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env)
             if res.code != 0:
                 all_ok = False
-                log.error(f"[defects4j test] failed for {entry}")
+                log.debug(f"[defects4j test] failed for {entry}")
                 if res.out:
-                    log.error(f"stdout: {res.out}")
+                    log.debug(f"stdout: {res.out}")
                 if res.err:
-                    log.error(f"stderr: {res.err}")
+                    log.debug(f"stderr: {res.err}")
         return all_ok
     else:
         res = run(["defects4j", "test"], cwd=work_dir, env=env)
         if res.code != 0:
-            log.error("[defects4j test] failed")
+            log.debug("[defects4j test] failed")
             if res.out:
-                log.error(f"stdout: {res.out}")
+                log.debug(f"stdout: {res.out}")
             if res.err:
-                log.error(f"stderr: {res.err}")
+                log.debug(f"stderr: {res.err}")
             return False
         return True
 

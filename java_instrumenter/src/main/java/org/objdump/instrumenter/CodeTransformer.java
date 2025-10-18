@@ -208,6 +208,10 @@ public class CodeTransformer {
         String returnType = method.getType().asString();
         List<Parameter> parameters = method.getParameters();
         
+        // Extract method signature and file path for instrumentation
+        String methodSignature = getMethodSignature(method);
+        String filePath = getCurrentFilePath(method);
+        
         // Create new method body
         BlockStmt newBody = new BlockStmt();
         
@@ -221,7 +225,7 @@ public class CodeTransformer {
         }
         
         // Write entry log
-        newBody.addStatement(createEntryCall(isStatic));
+        newBody.addStatement(createEntryCall(isStatic, methodSignature, filePath));
         
         // Declare return variable if needed (before any statements)
         if (!isVoid) {
@@ -238,7 +242,9 @@ public class CodeTransformer {
                 returnType, 
                 isStatic, 
                 isVoid,
-                !isVoid  // hasReturnVar = true if not void
+                !isVoid,  // hasReturnVar = true if not void
+                methodSignature,
+                filePath
             );
             
             // Add transformed statements
@@ -249,7 +255,7 @@ public class CodeTransformer {
         
         // Add exit log at end for void methods (if not already there)
         if (isVoid) {
-            newBody.addStatement(createExitCall(isStatic, null));
+            newBody.addStatement(createExitCall(isStatic, null, methodSignature, filePath));
         }
         
         method.setBody(newBody);
@@ -263,6 +269,10 @@ public class CodeTransformer {
         if (!hasAnnotation(constructor, "DumpObj")) {
             constructor.addAnnotation("DumpObj");
         }
+        
+        // Extract constructor signature and file path for instrumentation
+        String constructorSignature = getConstructorSignature(constructor);
+        String filePath = getCurrentFilePath(constructor);
         
         List<Parameter> parameters = constructor.getParameters();
         BlockStmt originalBody = constructor.getBody();
@@ -296,7 +306,7 @@ public class CodeTransformer {
         for (int i = 0; i < parameters.size(); i++) {
             newBody.addStatement(createParamPut(i, parameters.get(i).getNameAsString()));
         }
-        newBody.addStatement(createEntryCall(false));
+        newBody.addStatement(createEntryCall(false, constructorSignature, filePath));
         
         // Add remaining statements
         int startIdx = hasSuperOrThis ? 1 : 0;
@@ -307,7 +317,9 @@ public class CodeTransformer {
                 "void", 
                 false, 
                 true,
-                false  // constructors don't need return var
+                false,  // constructors don't need return var
+                constructorSignature,
+                filePath
             );
             for (Statement s : transformed) {
                 newBody.addStatement(s);
@@ -315,7 +327,7 @@ public class CodeTransformer {
         }
         
         // Add exit log at end
-        newBody.addStatement(createExitCall(false, null));
+        newBody.addStatement(createExitCall(false, null, constructorSignature, filePath));
         
         constructor.setBody(newBody);
     }
@@ -323,7 +335,7 @@ public class CodeTransformer {
     /**
      * Transform statements, handling return statements specially
      */
-    private static List<Statement> transformStatementsWithReturns(NodeList<Statement> statements, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar) {
+    private static List<Statement> transformStatementsWithReturns(NodeList<Statement> statements, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar, String methodSignature, String filePath) {
         List<Statement> transformed = new ArrayList<>();
         
         for (Statement stmt : statements) {
@@ -332,7 +344,7 @@ public class CodeTransformer {
                 
                 if (isVoid || !returnStmt.getExpression().isPresent()) {
                     // Void return
-                    transformed.add(createExitCall(isStatic, null));
+                    transformed.add(createExitCall(isStatic, null, methodSignature, filePath));
                     transformed.add(returnStmt);
                 } else {
                     // Return with expression - variable already declared at method level
@@ -348,7 +360,7 @@ public class CodeTransformer {
                     ));
                     
                     // Write exit log
-                    transformed.add(createExitCall(isStatic, "__objdump_ret"));
+                    transformed.add(createExitCall(isStatic, "__objdump_ret", methodSignature, filePath));
                     
                     // Return the variable
                     transformed.add(new ReturnStmt(new NameExpr("__objdump_ret")));
@@ -362,16 +374,18 @@ public class CodeTransformer {
                         returnType, 
                         isStatic, 
                         isVoid,
-                        hasReturnVar
+                        hasReturnVar,
+                        methodSignature,
+                        filePath
                     );
                     BlockStmt newBlock = new BlockStmt(new NodeList<>(nestedTransformed));
                     transformed.add(newBlock);
                 } else if (stmt instanceof IfStmt) {
                     IfStmt ifStmt = (IfStmt) stmt;
-                    Statement thenTransformed = transformSingleStatement(ifStmt.getThenStmt(), returnType, isStatic, isVoid, hasReturnVar);
+                    Statement thenTransformed = transformSingleStatement(ifStmt.getThenStmt(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
                     ifStmt.setThenStmt(thenTransformed);
                     if (ifStmt.getElseStmt().isPresent()) {
-                        Statement elseTransformed = transformSingleStatement(ifStmt.getElseStmt().get(), returnType, isStatic, isVoid, hasReturnVar);
+                        Statement elseTransformed = transformSingleStatement(ifStmt.getElseStmt().get(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
                         ifStmt.setElseStmt(elseTransformed);
                     }
                     transformed.add(ifStmt);
@@ -390,10 +404,10 @@ public class CodeTransformer {
         return transformed;
     }
     
-    private static Statement transformSingleStatement(Statement stmt, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar) {
+    private static Statement transformSingleStatement(Statement stmt, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar, String methodSignature, String filePath) {
         if (stmt instanceof BlockStmt) {
             BlockStmt block = (BlockStmt) stmt;
-            List<Statement> transformed = transformStatementsWithReturns(block.getStatements(), returnType, isStatic, isVoid, hasReturnVar);
+            List<Statement> transformed = transformStatementsWithReturns(block.getStatements(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
             return new BlockStmt(new NodeList<>(transformed));
         }
         return stmt;
@@ -449,9 +463,9 @@ public class CodeTransformer {
     }
     
     /**
-     * Create entry call: DebugDump.writeEntry(this/null, params, id);
+     * Create entry call: DebugDump.writeEntry(this/null, params, id, methodSig, filePath);
      */
-    private static Statement createEntryCall(boolean isStatic) {
+    private static Statement createEntryCall(boolean isStatic, String methodSig, String filePath) {
         return new ExpressionStmt(
             new MethodCallExpr(
                 new NameExpr("DebugDump"),
@@ -459,16 +473,18 @@ public class CodeTransformer {
                 new NodeList<>(
                     isStatic ? new NullLiteralExpr() : new ThisExpr(),
                     new NameExpr("__objdump_params"),
-                    new NameExpr("__objdump_id")
+                    new NameExpr("__objdump_id"),
+                    new StringLiteralExpr(methodSig),
+                    new StringLiteralExpr(filePath)
                 )
             )
         );
     }
     
     /**
-     * Create exit call: DebugDump.writeExit(this/null, null, retValue, id);
+     * Create exit call: DebugDump.writeExit(this/null, null, retValue, id, methodSig, filePath);
      */
-    private static Statement createExitCall(boolean isStatic, String retVarName) {
+    private static Statement createExitCall(boolean isStatic, String retVarName, String methodSig, String filePath) {
         Expression retExpr;
         if (retVarName != null) {
             retExpr = new CastExpr(
@@ -487,7 +503,9 @@ public class CodeTransformer {
                     isStatic ? new NullLiteralExpr() : new ThisExpr(),
                     new NullLiteralExpr(),
                     retExpr,
-                    new NameExpr("__objdump_id")
+                    new NameExpr("__objdump_id"),
+                    new StringLiteralExpr(methodSig),
+                    new StringLiteralExpr(filePath)
                 )
             )
         );
@@ -587,6 +605,68 @@ public class CodeTransformer {
         }
         sig.append(")");
         return sig.toString();
+    }
+    
+    /**
+     * Get the current file path for instrumentation
+     */
+    private static String getCurrentFilePath(MethodDeclaration method) {
+        // Get the compilation unit to find the package and class name
+        Optional<CompilationUnit> cu = method.findAncestor(CompilationUnit.class);
+        if (cu.isPresent()) {
+            CompilationUnit compilationUnit = cu.get();
+            StringBuilder path = new StringBuilder();
+            
+            // Add package name if present
+            if (compilationUnit.getPackageDeclaration().isPresent()) {
+                String packageName = compilationUnit.getPackageDeclaration().get().getNameAsString();
+                path.append(packageName.replace('.', '/')).append('/');
+            }
+            
+            // Add class name
+            Optional<String> className = compilationUnit.findFirst(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)
+                .map(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration::getNameAsString);
+            if (className.isPresent()) {
+                path.append(className.get()).append(".java");
+            } else {
+                path.append("Unknown.java");
+            }
+            
+            return path.toString();
+        }
+        
+        return "Unknown.java";
+    }
+    
+    /**
+     * Get the current file path for instrumentation (constructor version)
+     */
+    private static String getCurrentFilePath(ConstructorDeclaration constructor) {
+        // Get the compilation unit to find the package and class name
+        Optional<CompilationUnit> cu = constructor.findAncestor(CompilationUnit.class);
+        if (cu.isPresent()) {
+            CompilationUnit compilationUnit = cu.get();
+            StringBuilder path = new StringBuilder();
+            
+            // Add package name if present
+            if (compilationUnit.getPackageDeclaration().isPresent()) {
+                String packageName = compilationUnit.getPackageDeclaration().get().getNameAsString();
+                path.append(packageName.replace('.', '/')).append('/');
+            }
+            
+            // Add class name
+            Optional<String> className = compilationUnit.findFirst(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)
+                .map(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration::getNameAsString);
+            if (className.isPresent()) {
+                path.append(className.get()).append(".java");
+            } else {
+                path.append("Unknown.java");
+            }
+            
+            return path.toString();
+        }
+        
+        return "Unknown.java";
     }
 }
 

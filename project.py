@@ -146,62 +146,6 @@ def detect_java_version(work_dir: str) -> str:
     return "Unknown"
 
 
-def fix_math_build_xml_override(work_dir: str, jackson_version: str = "2.13.0") -> None:
-    """Fix the Math.build.xml override that removes Jackson dependencies."""
-    import xml.etree.ElementTree as ET
-    
-    # The Math.build.xml is in the Defects4J framework, but we can create a local override
-    # by modifying the project's build.xml to include Jackson dependencies in a way that
-    # won't be overridden by Math.build.xml
-    
-    build_xml_path = os.path.join(work_dir, "build.xml")
-    if not os.path.isfile(build_xml_path):
-        return
-    
-    try:
-        tree = ET.parse(build_xml_path)
-        root = tree.getroot()
-        
-        # Find the build.classpath and ensure Jackson dependencies are included
-        for path_tag in root.findall('path'):
-            if path_tag.get('id') == 'build.classpath':
-                # Check if Jackson dependencies are already present
-                existing_locations = {pe.get('location') for pe in path_tag.findall('pathelement')}
-                
-                jackson_deps = [
-                    f"lib/jackson-core-{jackson_version}.jar",
-                    f"lib/jackson-databind-{jackson_version}.jar", 
-                    f"lib/jackson-annotations-{jackson_version}.jar"
-                ]
-                
-                for dep in jackson_deps:
-                    if dep not in existing_locations:
-                        ET.SubElement(path_tag, 'pathelement', {'location': dep})
-                
-                break
-        
-        # Also ensure compile.classpath includes Jackson dependencies
-        for path_tag in root.findall('path'):
-            if path_tag.get('id') == 'compile.classpath':
-                # Check if it references build.classpath
-                for ref_tag in path_tag.findall('path'):
-                    if ref_tag.get('refid') == 'build.classpath':
-                        # Add Jackson dependencies directly to compile.classpath as well
-                        existing_locations = {pe.get('location') for pe in path_tag.findall('pathelement')}
-                        
-                        for dep in jackson_deps:
-                            if dep not in existing_locations:
-                                ET.SubElement(path_tag, 'pathelement', {'location': dep})
-                        break
-                break
-        
-        tree.write(build_xml_path, encoding='utf-8', xml_declaration=True)
-        
-    except Exception as e:
-        log = logging.getLogger("jackson_installer")
-        log.warning(f"Failed to fix Math build.xml override: {e}")
-
-
 def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str, str]":
     """Checkout buggy and fixed versions of the project.
     
@@ -365,7 +309,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         Dictionary mapping test names to their status ("correct" for passing, "wrong" for failing)
     """
     configure_logging()
-    log = logging.getLogger("jackson_installer")
+    log = logging.getLogger("test_runner")
     
     # Prepare dumps directory for per-test outputs
     dumps_dir = os.path.join(work_dir, "dumps")
@@ -382,44 +326,31 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     
     test_results = {}
     
-    if relevant_tests:
-        names = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
-        trigger_set = set()
-        if trigger_tests:
-            trigger_set = {t.strip() for t in trigger_tests.splitlines() if t.strip()}
-        
-        # Expand test classes into individual methods
-        expanded_tests = expand_test_classes(work_dir, names, log)
-        
-        log.info(f"Running all relevant tests ({len(expanded_tests)} individual methods):")
-        for test_name in expanded_tests:
-            log.info(f"- {test_name}")
-            safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
-            dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
-            abs_dump_path = os.path.abspath(dump_path)
-            log.debug(f"Running test {test_name} with dump path {abs_dump_path}")
-            per_test_env = {"OBJDUMP_OUT": abs_dump_path}
-            
-            # Run the test and capture the result
-            test_passed = defects4j.test(work_dir, [test_name], env=per_test_env)
-            test_status = "correct" if test_passed else "wrong"
-            test_results[test_name] = test_status
-            
-            # Log status for visibility
-            status_indicator = "✓" if test_passed else "✗"
-            log.info(f"  {status_indicator} {test_name}: {test_status}")
-            
-            # Verify trigger tests are failing as expected
-            if test_name in trigger_set and test_passed:
-                log.warning(f"Trigger test {test_name} passed unexpectedly on buggy version")
-    else:
-        # Fall back to running the full test suite if no relevant tests are exported
-        log.info("No relevant tests exported; running full test suite.")
-        if defects4j.test(work_dir, env=env_vars):
-            test_results["full_suite"] = "correct"
-        else:
-            test_results["full_suite"] = "wrong"
+    names = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
+    trigger_set = set()
+    if trigger_tests:
+        trigger_set = {t.strip() for t in trigger_tests.splitlines() if t.strip()}
     
+    # Expand test classes into individual methods
+    expanded_test_names = set(expand_test_classes(work_dir, names, log))
+    
+    def run_test(test_name: str, is_correct: bool) -> bool:
+        safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
+        dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
+        abs_dump_path = os.path.abspath(dump_path)
+        per_test_env = {"OBJDUMP_OUT": abs_dump_path}
+        defects4j.test(work_dir, [test_name], env=per_test_env)
+        test_results[test_name] = "correct" if is_correct else "wrong"
+    
+    correct_tests = expanded_test_names - trigger_set
+    
+    log.info(f"Correct tests: {len(correct_tests)}")
+    log.info(f"Trigger tests: {len(trigger_set)}")
+    for test_name in correct_tests:
+        run_test(test_name, True)
+
+    for test_name in trigger_set:
+        run_test(test_name, False)
     return test_results
 
 
@@ -512,7 +443,6 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     
     # Step 6: Run tests
     test_results = run_tests(work_dir)
-    log.info(f"Test results: {test_results}")
     
     # Step 7: Collect dump files
     collect_dump_files(work_dir, project_id, bug_id, test_results)

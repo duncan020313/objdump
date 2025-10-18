@@ -12,13 +12,13 @@ public final class DumpWrapper {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMap(params);
         
-        DebugDump.writeEntry(self, paramMap, id);
+        DebugDump.writeEntry(self, paramMap, id, "[DumpWrapper]", "[DumpWrapper]");
         try {
             T result = method.call();
-            DebugDump.writeExit(self, null, result, id);
+            DebugDump.writeExit(self, null, result, id, "[DumpWrapper]", "[DumpWrapper]");
             return result;
         } catch (Exception e) {
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
             // Re-throw as RuntimeException to avoid changing method signatures
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;
@@ -35,13 +35,13 @@ public final class DumpWrapper {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMapWithNames(paramNames, params);
         
-        DebugDump.writeEntry(self, paramMap, id);
+        DebugDump.writeEntry(self, paramMap, id, "[DumpWrapper]", "[DumpWrapper]");
         try {
             T result = method.call();
-            DebugDump.writeExit(self, null, result, id);
+            DebugDump.writeExit(self, null, result, id, "[DumpWrapper]", "[DumpWrapper]");
             return result;
         } catch (Exception e) {
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
             // Re-throw as RuntimeException to avoid changing method signatures
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;
@@ -58,12 +58,12 @@ public final class DumpWrapper {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMap(params);
         
-        DebugDump.writeEntry(self, paramMap, id);
+        DebugDump.writeEntry(self, paramMap, id, "[DumpWrapper]", "[DumpWrapper]");
         try {
             method.call();
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
         } catch (Exception e) {
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
             // Re-throw as RuntimeException to avoid changing method signatures
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;
@@ -80,12 +80,12 @@ public final class DumpWrapper {
         String id = DebugDump.newInvocationId();
         Map<String, Object> paramMap = extractParameterMapWithNames(paramNames, params);
         
-        DebugDump.writeEntry(self, paramMap, id);
+        DebugDump.writeEntry(self, paramMap, id, "[DumpWrapper]", "[DumpWrapper]");
         try {
             method.call();
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
         } catch (Exception e) {
-            DebugDump.writeExit(self, null, null, id);
+            DebugDump.writeExit(self, null, null, id, "[DumpWrapper]", "[DumpWrapper]");
             // Re-throw as RuntimeException to avoid changing method signatures
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;

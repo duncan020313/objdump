@@ -98,15 +98,15 @@ public final class DebugDump {
     return UUID.randomUUID().toString(); 
   }
 
-  public static void writeEntry(Object self, Map<String, Object> params, String id) {
-    write(self, params, null, id, "entry");
+  public static void writeEntry(Object self, Map<String, Object> params, String id, String methodSig, String filePath) {
+    write(self, params, null, id, "entry", methodSig, filePath);
   }
 
-  public static void writeExit(Object self, Map<String, Object> params, Object ret, String id) {
-    write(self, params, ret, id, "exit");
+  public static void writeExit(Object self, Map<String, Object> params, Object ret, String id, String methodSig, String filePath) {
+    write(self, params, ret, id, "exit", methodSig, filePath);
   }
 
-  private static synchronized void write(Object self, Map<String, Object> params, Object ret, String id, String phase) {
+  private static synchronized void write(Object self, Map<String, Object> params, Object ret, String id, String phase, String methodSig, String filePath) {
     try {
       Map<String, Object> record = new LinkedHashMap<String, Object>();
       record.put("id", id);
@@ -114,6 +114,8 @@ public final class DebugDump {
       record.put("self", self);
       record.put("params", params);
       record.put("ret", ret);
+      record.put("method_signature", methodSig);
+      record.put("file_path", filePath);
 
       String json = M.writeValueAsString(record);
 
