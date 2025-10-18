@@ -15,6 +15,7 @@ from build_systems.ant import add_dependencies as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
 from instrumentation.instrumenter import instrument_changed_methods, copy_java_template_to_classdir
+from instrumentation.test_extractor import extract_test_methods
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
 from objdump_io.net import download_files
@@ -33,6 +34,7 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
 
 def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -> bool:
     """Verify Jackson jars are in project classpath and accessible."""
+    log = logging.getLogger("jackson_installer")
     lib_dir = os.path.join(work_dir, "lib")
     required_jars = [
         f"jackson-core-{jackson_version}.jar",
@@ -44,7 +46,7 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
     for jar in required_jars:
         jar_path = os.path.join(lib_dir, jar)
         if not os.path.isfile(jar_path):
-            print(f"Missing JAR: {jar_path}")
+            log.error(f"Missing JAR: {jar_path}")
             return False
     
     # Check if jars are referenced in build files
@@ -60,7 +62,7 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
                     # For Maven POM files, check for jackson in dependencies
                     if build_file.endswith('pom.xml'):
                         if "jackson" not in content.lower():
-                            print(f"Missing Jackson in POM: {build_file}")
+                            log.error(f"Missing Jackson in POM: {build_file}")
                             return False
                     # For Ant build files (including maven-build.xml), check for jar references
                     elif build_file.endswith('.xml'):
@@ -71,11 +73,11 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
                                 jar_found = True
                                 break
                         if not jar_found:
-                            print(f"Missing Jackson JARs in build file: {build_file}")
+                            log.error(f"Missing Jackson JARs in build file: {build_file}")
                             return False
             except (IOError, UnicodeDecodeError):
                 # If we can't read the file, skip it but don't fail validation
-                print(f"Warning: Could not read build file: {build_file}")
+                log.warning(f"Could not read build file: {build_file}")
                 continue
     
     # Special check for defects4j.build.xml which is critical
@@ -90,10 +92,10 @@ def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -
                         jar_found = True
                         break
                 if not jar_found:
-                    print(f"Missing Jackson JARs in defects4j.build.xml: {defects4j_build}")
+                    log.error(f"Missing Jackson JARs in defects4j.build.xml: {defects4j_build}")
                     return False
         except (IOError, UnicodeDecodeError):
-            print(f"Warning: Could not read defects4j.build.xml: {defects4j_build}")
+            log.warning(f"Could not read defects4j.build.xml: {defects4j_build}")
     
     return True
 
@@ -196,7 +198,8 @@ def fix_math_build_xml_override(work_dir: str, jackson_version: str = "2.13.0") 
         tree.write(build_xml_path, encoding='utf-8', xml_declaration=True)
         
     except Exception as e:
-        print(f"Warning: Failed to fix Math build.xml override: {e}")
+        log = logging.getLogger("jackson_installer")
+        log.warning(f"Failed to fix Math build.xml override: {e}")
 
 
 def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str, str]":
@@ -319,6 +322,9 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, 
 
 def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, Any]]], work_dir: str, report_file: Optional[str] = None) -> None:
     """Generate instrumentation report."""
+    configure_logging()
+    log = logging.getLogger("jackson_installer")
+    
     report_items: List[Dict[str, Any]] = []
     for fpath, method_infos in instrumented_map.items():
         abs_path = os.path.abspath(fpath)
@@ -341,19 +347,23 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
         sig = item["signature"]
         grouped.setdefault(path, []).append(sig)
     total = sum(len(v) for v in grouped.values())
-    print(f"Instrumented methods ({total}):")
+    log.info(f"Instrumented methods ({total}):")
     for path in sorted(grouped.keys()):
-        print(f"- {path}")
+        log.info(f"- {path}")
         for sig in grouped[path]:
-            print(f"  - {sig}")
+            log.info(f"  - {sig}")
 
     os.makedirs(os.path.dirname(report_file), exist_ok=True)
     with open(report_file, "w", encoding="utf-8") as rf:
         rf.write(payload)
 
 
-def run_tests(work_dir: str) -> None:
-    """Run tests for the project."""
+def run_tests(work_dir: str) -> Dict[str, str]:
+    """Run all relevant tests for the project and return their pass/fail status.
+    
+    Returns:
+        Dictionary mapping test names to their status ("correct" for passing, "wrong" for failing)
+    """
     configure_logging()
     log = logging.getLogger("jackson_installer")
     
@@ -365,37 +375,116 @@ def run_tests(work_dir: str) -> None:
     env_vars = {"OBJDUMP_OUT": out_file}
     
     defects4j.compile(work_dir, env=env_vars)
-    tests = defects4j.export(work_dir, "tests.trigger")
-    if tests:
-        names = [t.strip() for t in tests.splitlines() if t.strip()]
-        # Print triggering test list for visibility
-        print(f"Triggering tests ({len(names)}):")
-        for name in names:
-            print(f"- {name}")
-            safe = re.sub(r"[^A-Za-z0-9]", "-", name)
+    
+    # Get all relevant tests (includes trigger tests)
+    relevant_tests = defects4j.export(work_dir, "tests.relevant")
+    trigger_tests = defects4j.export(work_dir, "tests.trigger")
+    
+    test_results = {}
+    
+    if relevant_tests:
+        names = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
+        trigger_set = set()
+        if trigger_tests:
+            trigger_set = {t.strip() for t in trigger_tests.splitlines() if t.strip()}
+        
+        # Expand test classes into individual methods
+        expanded_tests = expand_test_classes(work_dir, names, log)
+        
+        log.info(f"Running all relevant tests ({len(expanded_tests)} individual methods):")
+        for test_name in expanded_tests:
+            log.info(f"- {test_name}")
+            safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
             dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
             abs_dump_path = os.path.abspath(dump_path)
-            print(f"Running test {name} with dump path {abs_dump_path}")
+            log.debug(f"Running test {test_name} with dump path {abs_dump_path}")
             per_test_env = {"OBJDUMP_OUT": abs_dump_path}
-            defects4j.test(work_dir, [name], env=per_test_env)
+            
+            # Run the test and capture the result
+            test_passed = defects4j.test(work_dir, [test_name], env=per_test_env)
+            test_status = "correct" if test_passed else "wrong"
+            test_results[test_name] = test_status
+            
+            # Log status for visibility
+            status_indicator = "✓" if test_passed else "✗"
+            log.info(f"  {status_indicator} {test_name}: {test_status}")
+            
+            # Verify trigger tests are failing as expected
+            if test_name in trigger_set and test_passed:
+                log.warning(f"Trigger test {test_name} passed unexpectedly on buggy version")
     else:
-        # Fall back to running the full test suite if no triggering tests are exported
-        print("No triggering tests exported; running full test suite.")
-        defects4j.test(work_dir, env=env_vars)
+        # Fall back to running the full test suite if no relevant tests are exported
+        log.info("No relevant tests exported; running full test suite.")
+        if defects4j.test(work_dir, env=env_vars):
+            test_results["full_suite"] = "correct"
+        else:
+            test_results["full_suite"] = "wrong"
+    
+    return test_results
 
 
-def collect_dump_files(work_dir: str, project_id: str, bug_id: str) -> Optional[str]:
+def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
+    """
+    Expand test class names into individual test methods.
+    
+    Args:
+        work_dir: Working directory of the Defects4J project
+        test_names: List of test names (may include classes or individual methods)
+        log: Logger instance
+        
+    Returns:
+        List of expanded test names (individual methods or original names if already methods)
+    """
+    expanded_tests = []
+    
+    for test_name in test_names:
+        # Check if this is already a specific method (contains ::)
+        if "::" in test_name:
+            # Already a specific method, use as-is
+            expanded_tests.append(test_name)
+            continue
+        
+        # This is a test class, try to expand it
+        log.debug(f"Expanding test class: {test_name}")
+        
+        # Resolve test class to file path
+        test_file_path = defects4j.resolve_test_class_path(work_dir, test_name)
+        if not test_file_path:
+            log.warning(f"Could not resolve test class file for: {test_name}")
+            # Fall back to running the entire class
+            expanded_tests.append(test_name)
+            continue
+        
+        # Extract test methods from the class file
+        test_methods = extract_test_methods(test_file_path)
+        if not test_methods:
+            log.warning(f"Could not extract test methods from: {test_file_path}")
+            # Fall back to running the entire class
+            expanded_tests.append(test_name)
+            continue
+        
+        # Add each test method with class name prefix
+        for method_name in test_methods:
+            full_test_name = f"{test_name}::{method_name}"
+            expanded_tests.append(full_test_name)
+        
+        log.debug(f"Expanded {test_name} into {len(test_methods)} methods")
+    
+    return expanded_tests
+
+
+def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results: Optional[Dict[str, str]] = None) -> Optional[str]:
     """Collect dump files after test execution."""
     configure_logging()
     log = logging.getLogger("jackson_installer")
     
     # Use centralized location from environment variable or default
     output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
-    collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
+    collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base, test_results)
     if collection_dir:
-        print(f"Collected dump files to: {collection_dir}")
+        log.info(f"Collected dump files to: {collection_dir}")
     else:
-        print("Warning: Failed to collect dump files")
+        log.warning("Failed to collect dump files")
     
     return collection_dir
 
@@ -422,10 +511,11 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     generate_instrumentation_report(instrumented_map, work_dir, report_file)
     
     # Step 6: Run tests
-    run_tests(work_dir)
+    test_results = run_tests(work_dir)
+    log.info(f"Test results: {test_results}")
     
     # Step 7: Collect dump files
-    collect_dump_files(work_dir, project_id, bug_id)
+    collect_dump_files(work_dir, project_id, bug_id, test_results)
 
 
 def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None, skip_shared_build_injection: bool = False) -> Dict[str, Any]:
@@ -470,13 +560,14 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     }
     
     # Post-compile Jackson re-injection for newly generated build files
+    log = logging.getLogger("run_all_staged")
     try:
         inject_jackson_into_all_build_files(work_dir, jackson_version)
         # Re-validate Jackson classpath after re-injection
         if not validate_jackson_classpath(work_dir, jackson_version):
-            print("Warning: Jackson classpath validation failed after re-injection")
+            log.warning("Jackson classpath validation failed after re-injection")
     except Exception as e:
-        print(f"Warning: Post-compile Jackson re-injection failed: {e}")
+        log.warning(f"Post-compile Jackson re-injection failed: {e}")
 
     # Step 4: Instrument changed methods
     instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir)
@@ -498,36 +589,26 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
         return status
     status["stages"]["rebuild"] = "ok"
 
-    # Step 6: Run tests (triggering if available)
-    dumps_dir = os.path.join(work_dir, "dumps")
-    try:
-        os.makedirs(dumps_dir, exist_ok=True)
-    except Exception:
-        pass
-
-    tests = defects4j.export(work_dir, "tests.trigger")
-    if tests:
-        names = [t.strip() for t in tests.splitlines() if t.strip()]
-        status["stages"]["tests"]["triggering"] = names
-        all_ok = True
-        for name in names:
-            safe = re.sub(r"[^A-Za-z0-9]", "-", name)
-            dump_path = os.path.join(dumps_dir, f"{safe}.jsonl")
-            abs_dump_path = os.path.abspath(dump_path)
-            if not defects4j.test(work_dir, [name], env={"OBJDUMP_OUT": abs_dump_path}):
-                all_ok = False
-        status["stages"]["tests"]["status"] = "ok" if all_ok else "fail"
-    else:
-        if defects4j.test(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.jsonl")}):
-            status["stages"]["tests"]["status"] = "ok"
-        else:
-            status["stages"]["tests"]["status"] = "fail"
+    # Step 6: Run tests (all relevant tests)
+    test_results = run_tests(work_dir)
+    
+    # Update status with test results
+    correct_tests = [name for name, status in test_results.items() if status == "correct"]
+    wrong_tests = [name for name, status in test_results.items() if status == "wrong"]
+    
+    status["stages"]["tests"]["status"] = "ok" if test_results else "fail"
+    status["stages"]["tests"]["correct"] = correct_tests
+    status["stages"]["tests"]["wrong"] = wrong_tests
+    status["stages"]["tests"]["total"] = len(test_results)
+    
+    # Store test results for collection phase
+    status["test_results"] = test_results
 
     # Step 7: Collect dump files after test execution
     try:
         # Use centralized location from environment variable or default
         output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
-        collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base)
+        collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base, test_results)
         if collection_dir:
             status["stages"]["collect_dumps"] = {"status": "ok", "collection_dir": collection_dir}
         else:

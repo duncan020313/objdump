@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Tuple, Any
 from objdump_io.shell import run
-import re
+import logging
 
 
 def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -> bool:
@@ -10,38 +10,40 @@ def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -
 
 def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, str, str]:
     """Compile the project and return (success, stdout, stderr)."""
+    log = logging.getLogger("defects4j")
     res = run(["defects4j", "compile"], cwd=work_dir, env=env)
     if res.code != 0:
-        print("[defects4j compile] failed")
+        log.error("[defects4j compile] failed")
         if res.out:
-            print(res.out)
+            log.error(f"stdout: {res.out}")
         if res.err:
-            print(res.err)
+            log.error(f"stderr: {res.err}")
         return False, res.out or "", res.err or ""
     return True, res.out or "", res.err or ""
 
 
 def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None) -> bool:
+    log = logging.getLogger("defects4j")
     if tests:
         all_ok = True
         for entry in tests:
             res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env)
             if res.code != 0:
                 all_ok = False
-                print("[defects4j test] failed for", entry)
+                log.error(f"[defects4j test] failed for {entry}")
                 if res.out:
-                    print(res.out)
+                    log.error(f"stdout: {res.out}")
                 if res.err:
-                    print(res.err)
+                    log.error(f"stderr: {res.err}")
         return all_ok
     else:
         res = run(["defects4j", "test"], cwd=work_dir, env=env)
         if res.code != 0:
-            print("[defects4j test] failed")
+            log.error("[defects4j test] failed")
             if res.out:
-                print(res.out)
+                log.error(f"stdout: {res.out}")
             if res.err:
-                print(res.err)
+                log.error(f"stderr: {res.err}")
             return False
         return True
 
@@ -90,6 +92,74 @@ def get_source_classes_dir(work_dir: str) -> str:
     
     # Default fallback
     return "src/main/java"
+
+
+def get_test_classes_dir(work_dir: str) -> str:
+    """
+    Robustly detect the test classes directory for Java test files.
+    
+    Uses defects4j export -p "dir.src.tests" to get the correct path,
+    with fallback to common directory structures if export fails.
+    
+    Args:
+        work_dir: Working directory of the Defects4J project
+        
+    Returns:
+        Relative path to the test classes directory (e.g., "src/test/java" or "test")
+    """
+    # Try to get the directory from Defects4J export
+    tests_dir = export(work_dir, "dir.src.tests")
+    if tests_dir:
+        return tests_dir
+    
+    # Fallback: check for common directory structures
+    import os
+    common_paths = [
+        "src/test/java",
+        "test/java",
+        "test",
+        "tests"
+    ]
+    
+    for path in common_paths:
+        full_path = os.path.join(work_dir, path)
+        if os.path.exists(full_path) and os.path.isdir(full_path):
+            # Check if it contains Java files
+            for root, dirs, files in os.walk(full_path):
+                if any(f.endswith('.java') for f in files):
+                    return path
+    
+    # Default fallback
+    return "src/test/java"
+
+
+def resolve_test_class_path(work_dir: str, test_class_name: str) -> Optional[str]:
+    """
+    Convert a test class name to its file path.
+    
+    Args:
+        work_dir: Working directory of the Defects4J project
+        test_class_name: Fully qualified class name (e.g., "org.apache.commons.math3.distribution.HypergeometricDistributionTest")
+        
+    Returns:
+        Absolute path to the .java file if it exists, None otherwise
+    """
+    import os
+    
+    # Get test classes directory
+    tests_dir = get_test_classes_dir(work_dir)
+    
+    # Convert class name to file path
+    # e.g., "org.apache.commons.math3.distribution.HypergeometricDistributionTest" 
+    # -> "org/apache/commons/math3/distribution/HypergeometricDistributionTest.java"
+    class_path = test_class_name.replace(".", "/") + ".java"
+    file_path = os.path.join(work_dir, tests_dir, class_path)
+    
+    # Check if file exists
+    if os.path.isfile(file_path):
+        return os.path.abspath(file_path)
+    
+    return None
 
 
 

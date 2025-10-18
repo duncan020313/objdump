@@ -35,6 +35,10 @@ public class Main {
                     handleExtractMethods(args);
                     break;
                     
+                case "extract-tests":
+                    handleExtractTests(args);
+                    break;
+                    
                 default:
                     System.err.println("Unknown command: " + command);
                     printUsage();
@@ -143,6 +147,23 @@ public class Main {
     }
     
     /**
+     * Handle extract-tests command
+     * Usage: extract-tests <test_class_file>
+     */
+    private static void handleExtractTests(String[] args) throws IOException {
+        if (args.length < 2) {
+            System.err.println("Usage: extract-tests <test_class_file>");
+            System.exit(1);
+        }
+        
+        String testClassFile = args[1];
+        List<String> testMethods = TestMethodExtractor.extractTestMethods(testClassFile);
+        
+        // Output test method names as JSON array
+        System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(testMethods));
+    }
+    
+    /**
      * Print usage information
      */
     private static void printUsage() {
@@ -157,6 +178,9 @@ public class Main {
         System.err.println();
         System.err.println("  extract-methods <java_file> <start1:end1> [<start2:end2> ...]");
         System.err.println("      Extract method signatures that intersect with given line ranges");
+        System.err.println();
+        System.err.println("  extract-tests <test_class_file>");
+        System.err.println("      Extract test method names from a test class file");
         System.err.println();
     }
 }
