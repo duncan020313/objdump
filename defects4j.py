@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Tuple, Any, Union
 from objdump_io.shell import run
 import logging
 
@@ -22,13 +22,23 @@ def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, 
     return True, res.out or "", res.err or ""
 
 
-def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 60) -> bool:
+def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 60) -> Union[bool, str]:
+    """
+    Run defects4j tests and return result.
+    
+    Returns:
+        bool: True if all tests passed, False if any test failed
+        str: "timeout" if any test timed out
+    """
     log = logging.getLogger("defects4j")
     if tests:
         all_ok = True
         for entry in tests:
             res = run(["defects4j", "test", "-t", entry], cwd=work_dir, env=env, timeout=timeout)
-            if res.code != 0:
+            if res.code == -1:  # Timeout occurred
+                log.warning(f"[defects4j test] timed out for {entry} - skipping")
+                return "timeout"
+            elif res.code != 0:
                 all_ok = False
                 log.debug(f"[defects4j test] failed for {entry}")
                 if res.out:
@@ -38,7 +48,10 @@ def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[st
         return all_ok
     else:
         res = run(["defects4j", "test"], cwd=work_dir, env=env, timeout=timeout)
-        if res.code != 0:
+        if res.code == -1:  # Timeout occurred
+            log.warning("[defects4j test] timed out")
+            return "timeout"
+        elif res.code != 0:
             log.debug("[defects4j test] failed")
             if res.out:
                 log.debug(f"stdout: {res.out}")

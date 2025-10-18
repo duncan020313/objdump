@@ -4,12 +4,47 @@ import shutil
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict
-from instrumentation.post_processor import post_process_dump_files
+from instrumentation.post_processor import post_process_dump_files, process_multiple_directories_by_method
+
+
+def _cleanup_collection_directory(collection_dir: str, has_test_results: bool) -> None:
+    """
+    Remove all files and directories except correct/, wrong/, schemas/, and instrumented_methods.json.
+    
+    Args:
+        collection_dir: Directory to clean up
+        has_test_results: Whether test results are available (affects which directories to keep)
+    """
+    log = logging.getLogger("collector")
+    
+    try:
+        for item in os.listdir(collection_dir):
+            item_path = os.path.join(collection_dir, item)
+            
+            # Keep essential directories and files
+            if item in ["correct", "wrong", "schemas"]:
+                continue
+            if item == "instrumented_methods.json":
+                continue
+            
+            # Remove everything else
+            try:
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    log.debug(f"Removed directory: {item}")
+                else:
+                    os.remove(item_path)
+                    log.debug(f"Removed file: {item}")
+            except OSError as e:
+                log.warning(f"Failed to remove {item}: {e}")
+                
+    except OSError as e:
+        log.error(f"Failed to list directory {collection_dir}: {e}")
 
 
 def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str, test_results: Optional[Dict[str, str]] = None) -> str:
     """
-    Collect all JSONL dump files from the dumps directory and organize them by project/bug ID.
+    Collect all JSON dump files from the dumps directory and organize them by project/bug ID.
     Separates dump files into correct/ and wrong/ subdirectories based on test results.
     Also copies instrumented methods JSON file if it exists.
     
@@ -119,27 +154,45 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
     try:
         log.info("Post-processing collected files to remove MAX_DEPTH_REACHED entries...")
         
-        # Post-process subdirectories if they exist
         if test_results:
+            # Process both correct and wrong directories with unified schema generation
             correct_dir = os.path.join(collection_dir, "correct")
             wrong_dir = os.path.join(collection_dir, "wrong")
+            schemas_output_dir = os.path.join(collection_dir, "schemas")
             
+            # Collect directories that exist
+            directories_to_process = []
             if os.path.exists(correct_dir):
-                log.info("Post-processing correct/ subdirectory...")
-                correct_stats = post_process_dump_files(correct_dir, backup=True)
-                log.info(f"Correct subdirectory: {correct_stats['jsonl_files_processed']} JSON files processed")
-            
+                directories_to_process.append(correct_dir)
             if os.path.exists(wrong_dir):
-                log.info("Post-processing wrong/ subdirectory...")
-                wrong_stats = post_process_dump_files(wrong_dir, backup=True)
-                log.info(f"Wrong subdirectory: {wrong_stats['jsonl_files_processed']} JSON files processed")
+                directories_to_process.append(wrong_dir)
+            
+            if directories_to_process:
+                log.info(f"Processing {len(directories_to_process)} directories for unified schema generation")
+                stats = process_multiple_directories_by_method(
+                    directories_to_process, 
+                    schemas_output_dir, 
+                    backup=True
+                )
+                log.info(f"Unified post-processing complete: {stats['json_files_processed']} JSON files, "
+                        f"{stats['total_lines_processed']} lines processed, "
+                        f"{stats['schemas_generated']} schemas generated")
+                if stats['errors'] > 0:
+                    log.warning(f"Post-processing had {stats['errors']} errors")
+            else:
+                log.warning("No correct/ or wrong/ directories found for schema generation")
         else:
             # Post-process root directory if no test results
             stats = post_process_dump_files(collection_dir, backup=True)
-            log.info(f"Post-processing complete: {stats['jsonl_files_processed']} JSON files, "
-                    f"{stats['json_files_processed']} JSON files, {stats['total_lines_processed']} lines processed")
+            log.info(f"Post-processing complete: {stats['json_files_processed']} JSON files, "
+                    f"{stats['total_lines_processed']} lines processed")
             if stats['errors'] > 0:
                 log.warning(f"Post-processing had {stats['errors']} errors")
+        
+        # Clean up: Remove all files and directories except correct/, wrong/, schemas/, and instrumented_methods.json
+        log.info("Cleaning up collection directory...")
+        _cleanup_collection_directory(collection_dir, test_results is not None)
+        
     except Exception as e:
         log.error(f"Post-processing failed: {e}")
         # Don't fail the collection process if post-processing fails
