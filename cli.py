@@ -1,7 +1,9 @@
 import argparse
+import logging
 import os
 import csv
-import io
+import subprocess
+import sys
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
@@ -15,16 +17,42 @@ import defects4j
 import classification
 
 
+def build_java_instrumenter() -> bool:
+    """Build the Java instrumenter using Maven.
+    
+    Returns:
+        True if build succeeded, False otherwise
+    """
+    log = logging.getLogger("build_java_instrumenter")
+    instrumenter_dir = os.path.join(os.path.dirname(__file__), "java_instrumenter")
+    
+    log.info("Building Java instrumenter...")
+    result = subprocess.run(
+        ["mvn", "clean", "package", "-q"],
+        cwd=instrumenter_dir,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        log.error("Java instrumenter build failed")
+        sys.exit(1)
+    
+    log.info("Java instrumenter built successfully")
+    return True
+
+
 def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int]]:
     """Load valid bug IDs from CSV file.
     
     Returns:
         Dictionary mapping project names to sets of valid bug IDs
     """
+    log = logging.getLogger("load_valid_bugs")
     valid_bugs = {}
     
     if not os.path.exists(csv_path):
-        print(f"Warning: {csv_path} not found. Will use all available bugs.")
+        log.warning(f"Warning: {csv_path} not found. Will use all available bugs.")
         return {}
     
     try:
@@ -38,12 +66,12 @@ def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int
                     valid_bugs[project] = set()
                 valid_bugs[project].add(bug_id)
         
-        print(f"Loaded valid bugs from {csv_path}:")
+        log.info(f"Loaded valid bugs from {csv_path}:")
         for project, bugs in valid_bugs.items():
-            print(f"  {project}: {len(bugs)} bugs")
+            log.info(f"  {project}: {len(bugs)} bugs")
             
     except Exception as e:
-        print(f"Error loading {csv_path}: {e}")
+        log.error(f"Error loading {csv_path}: {e}")
         return {}
     
     return valid_bugs
@@ -90,6 +118,14 @@ def main() -> None:
     p_classify.add_argument("--filter-functional", action="store_true", help="Filter functional bugs")
 
     args = parser.parse_args()
+    
+    logging.configure_logging()
+    log = logging.getLogger("cli")
+    
+    if not build_java_instrumenter():
+        log.error("Failed to build Java instrumenter. Exiting.")
+        sys.exit(1)
+        
 
     if args.cmd == "all":
         run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.report_file)
@@ -102,14 +138,14 @@ def main() -> None:
         
         # Set environment variable for centralized dumps directory
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
-        print(f"Dump files will be collected to: {args.dumps_dir}")
+        log.info(f"Dump files will be collected to: {args.dumps_dir}")
 
         # Inject Jackson into Defects4J shared build files once per project
         # This is more efficient than doing it for each individual bug
         
-        print("Injecting Jackson dependencies into Defects4J shared build files...")
+        log.info("Injecting Jackson dependencies into Defects4J shared build files...")
         inject_jackson_into_defects4j_shared_build(args.jackson_version)
-        print("Jackson injection completed for all projects")
+        log.info("Jackson injection completed for all projects")
 
         results: List[Dict[str, Any]] = []
 
@@ -123,14 +159,14 @@ def main() -> None:
                 # Use valid bugs if available, otherwise fall back to all bugs
                 if proj in valid_bugs:
                     ids = sorted(list(valid_bugs[proj]))
-                    print(f"Using {len(ids)} valid bugs for {proj}")
+                    log.info(f"Using {len(ids)} valid bugs for {proj}")
                 else:
                     ids = defects4j.list_bug_ids(proj)
-                    print(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
+                    log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
                 
                 if args.max_bugs_per_project > 0:
                     ids = ids[: args.max_bugs_per_project]
-                    print(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
+                    log.info(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
                 
                 for bug_id in ids:
                     futures.append(ex.submit(job, proj, bug_id))
@@ -158,22 +194,22 @@ def main() -> None:
     elif args.cmd == "postprocess":
         
         if not os.path.exists(args.dump_dir):
-            print(f"Error: Directory {args.dump_dir} does not exist")
+            log.error(f"Error: Directory {args.dump_dir} does not exist")
             return
         
-        print(f"Post-processing dump files in {args.dump_dir}")
+        log.info(f"Post-processing dump files in {args.dump_dir}")
         stats = post_process_dump_files(args.dump_dir, backup=not args.no_backup)
         
         if args.verbose:
-            print(f"Processing complete:")
-            print(f"  JSONL files processed: {stats['jsonl_files_processed']}")
-            print(f"  JSON files processed: {stats['json_files_processed']}")
-            print(f"  Total lines processed: {stats['total_lines_processed']}")
-            print(f"  Errors: {stats['errors']}")
+            log.info(f"Processing complete:")
+            log.info(f"  JSONL files processed: {stats['jsonl_files_processed']}")
+            log.info(f"  JSON files processed: {stats['json_files_processed']}")
+            log.info(f"  Total lines processed: {stats['total_lines_processed']}")
+            log.info(f"  Errors: {stats['errors']}")
         else:
-            print(f"Processed {stats['jsonl_files_processed']} JSONL files, {stats['json_files_processed']} JSON files")
+            log.info(f"Processed {stats['jsonl_files_processed']} JSONL files, {stats['json_files_processed']} JSON files")
             if stats['errors'] > 0:
-                print(f"Warning: {stats['errors']} errors occurred during processing")
+                log.warning(f"Warning: {stats['errors']} errors occurred during processing")
     
     elif args.cmd == "classify":
         # Handle single bug classification (backward compatibility)
@@ -181,7 +217,7 @@ def main() -> None:
             bug_info = defects4j.classify_bug(args.project, args.bug)
             
             if not bug_info:
-                print(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
+                log.error(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
                 return
         else:
             projects = [
@@ -204,26 +240,26 @@ def main() -> None:
                 "Time"
             ]
             
-            print(f"Classifying bugs for projects: {', '.join(projects)}")
-            print(f"Using {args.workers} parallel workers")
+            log.info(f"Classifying bugs for projects: {', '.join(projects)}")
+            log.info(f"Using {args.workers} parallel workers")
             
             # Use the classification module
             all_results = classification.classify_projects(projects, args.max_bugs_per_project, args.workers)
             
         if args.filter_functional:
             all_results = classification.filter_functional_bugs(all_results)
-            print(f"Filtered to {len(all_results)} functional bugs")
+            log.info(f"Filtered to {len(all_results)} functional bugs")
             
         # Write outputs
         if args.output:
             classification.write_classification_csv(args.output, all_results)
-            print(f"CSV results saved to {args.output}")
+            log.info(f"CSV results saved to {args.output}")
         
         if args.output_md:
             classification.write_classification_markdown(args.output_md, all_results)
-            print(f"Markdown results saved to {args.output_md}")
+            log.info(f"Markdown results saved to {args.output_md}")
         
-        print(f"Total bugs classified: {len(all_results)}")
+        log.info(f"Total bugs classified: {len(all_results)}")
 
         
 if __name__ == "__main__":
