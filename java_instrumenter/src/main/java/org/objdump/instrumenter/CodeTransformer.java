@@ -138,10 +138,10 @@ public class CodeTransformer {
             String originalCode;
             
             if (methodInfo.isConstructor) {
-                javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.constructorDeclaration);
+                javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.constructorDeclaration, cu, javaFilePath);
                 originalCode = JavaDocExtractor.extractMethodCode(methodInfo.constructorDeclaration);
             } else {
-                javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.methodDeclaration);
+                javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.methodDeclaration, cu, javaFilePath);
                 originalCode = JavaDocExtractor.extractMethodCode(methodInfo.methodDeclaration);
             }
             
@@ -389,12 +389,73 @@ public class CodeTransformer {
                         ifStmt.setElseStmt(elseTransformed);
                     }
                     transformed.add(ifStmt);
-                } else if (stmt instanceof ForStmt || stmt instanceof WhileStmt || stmt instanceof DoStmt || stmt instanceof ForEachStmt) {
-                    // Transform loop bodies
-                    transformed.add(stmt);
+                } else if (stmt instanceof WhileStmt) {
+                    WhileStmt whileStmt = (WhileStmt) stmt;
+                    Statement bodyTransformed = transformSingleStatement(whileStmt.getBody(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+                    whileStmt.setBody(bodyTransformed);
+                    transformed.add(whileStmt);
+                } else if (stmt instanceof ForStmt) {
+                    ForStmt forStmt = (ForStmt) stmt;
+                    Statement bodyTransformed = transformSingleStatement(forStmt.getBody(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+                    forStmt.setBody(bodyTransformed);
+                    transformed.add(forStmt);
+                } else if (stmt instanceof DoStmt) {
+                    DoStmt doStmt = (DoStmt) stmt;
+                    Statement bodyTransformed = transformSingleStatement(doStmt.getBody(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+                    doStmt.setBody(bodyTransformed);
+                    transformed.add(doStmt);
+                } else if (stmt instanceof ForEachStmt) {
+                    ForEachStmt forEachStmt = (ForEachStmt) stmt;
+                    Statement bodyTransformed = transformSingleStatement(forEachStmt.getBody(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+                    forEachStmt.setBody(bodyTransformed);
+                    transformed.add(forEachStmt);
                 } else if (stmt instanceof TryStmt) {
-                    // Handle try-catch blocks
-                    transformed.add(stmt);
+                    TryStmt tryStmt = (TryStmt) stmt;
+                    
+                    // Transform try block
+                    BlockStmt tryBlock = tryStmt.getTryBlock();
+                    List<Statement> tryTransformed = transformStatementsWithReturns(
+                        tryBlock.getStatements(), 
+                        returnType, 
+                        isStatic, 
+                        isVoid,
+                        hasReturnVar,
+                        methodSignature,
+                        filePath
+                    );
+                    tryStmt.setTryBlock(new BlockStmt(new NodeList<>(tryTransformed)));
+                    
+                    // Transform catch blocks
+                    for (com.github.javaparser.ast.stmt.CatchClause catchClause : tryStmt.getCatchClauses()) {
+                        BlockStmt catchBlock = catchClause.getBody();
+                        List<Statement> catchTransformed = transformStatementsWithReturns(
+                            catchBlock.getStatements(), 
+                            returnType, 
+                            isStatic, 
+                            isVoid,
+                            hasReturnVar,
+                            methodSignature,
+                            filePath
+                        );
+                        catchClause.setBody(new BlockStmt(new NodeList<>(catchTransformed)));
+                    }
+                    
+                    // Transform finally block if present
+                    if (tryStmt.getFinallyBlock().isPresent()) {
+                        BlockStmt finallyBlock = tryStmt.getFinallyBlock().get();
+                        List<Statement> finallyTransformed = transformStatementsWithReturns(
+                            finallyBlock.getStatements(), 
+                            returnType, 
+                            isStatic, 
+                            isVoid,
+                            hasReturnVar,
+                            methodSignature,
+                            filePath
+                        );
+                        tryStmt.setFinallyBlock(new BlockStmt(new NodeList<>(finallyTransformed)));
+                    }
+                    
+                    transformed.add(tryStmt);
                 } else {
                     transformed.add(stmt);
                 }
@@ -409,6 +470,24 @@ public class CodeTransformer {
             BlockStmt block = (BlockStmt) stmt;
             List<Statement> transformed = transformStatementsWithReturns(block.getStatements(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
             return new BlockStmt(new NodeList<>(transformed));
+        } else if (stmt instanceof ReturnStmt) {
+            // Handle single return statement (not in a block)
+            List<Statement> transformed = transformStatementsWithReturns(new NodeList<>(stmt), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+            // Wrap in block if multiple statements were generated
+            if (transformed.size() == 1) {
+                return transformed.get(0);
+            } else {
+                return new BlockStmt(new NodeList<>(transformed));
+            }
+        } else if (stmt instanceof IfStmt || stmt instanceof WhileStmt || stmt instanceof ForStmt || 
+                   stmt instanceof DoStmt || stmt instanceof ForEachStmt || stmt instanceof TryStmt) {
+            // These need recursive transformation
+            List<Statement> transformed = transformStatementsWithReturns(new NodeList<>(stmt), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
+            if (transformed.size() == 1) {
+                return transformed.get(0);
+            } else {
+                return new BlockStmt(new NodeList<>(transformed));
+            }
         }
         return stmt;
     }
