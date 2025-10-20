@@ -5,6 +5,9 @@ import os
 import xml.etree.ElementTree as ET
 import logging
 from jt_types import BuildSystem
+from .ant import add_jackson_to_build_file, verify_jackson_in_defects4j_shared_build, process_all_ant_files_in_dir
+from defects4j import get_project_build_file
+from .maven import add_dependencies_to_maven_build_xml, add_dependencies
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +104,7 @@ def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2
     Ant projects now use the centralized Defects4J shared build file for Jackson dependencies,
     so this function only handles Maven POM files.
     """
-    from .maven import add_dependencies_to_maven_build_xml
+    
     
     # Find all build files
     build_files = find_all_build_files(work_dir)
@@ -112,13 +115,10 @@ def inject_jackson_into_all_build_files(work_dir: str, jackson_version: str = "2
             
             if filename == 'pom.xml':
                 # Handle Maven POM files
-                from .maven import add_dependencies
                 add_dependencies(build_file, jackson_version)
             elif filename in ('maven-build.xml', 'defects4j.build.xml') or filename.endswith('-build.xml'):
                 # Handle Maven-generated Ant build files
                 add_dependencies_to_maven_build_xml(build_file, jackson_version)
-            # Ant build files (build.xml) are now handled by the shared Defects4J build file
-                
         except Exception as e:
             # Log error but continue with other files
             log.warning(f"Failed to inject Jackson into {build_file}: {e}")
@@ -136,9 +136,7 @@ def inject_jackson_into_project_templates(project_ids: List[str], jackson_versio
         project_ids: List of Defects4J project IDs (e.g., ["Math", "Lang", "Chart"])
         jackson_version: Jackson library version to use
     """
-    from .ant import add_dependencies_to_project_template
-    from defects4j import get_project_build_file
-    
+   
     modified_count = 0
     skipped_count = 0
     failed_count = 0
@@ -154,7 +152,7 @@ def inject_jackson_into_project_templates(project_ids: List[str], jackson_versio
             continue
         
         # Add Jackson dependencies to the project template
-        success = add_dependencies_to_project_template(build_file_path, jackson_version)
+        success = add_jackson_to_build_file(build_file_path, jackson_version)
         if success:
             modified_count += 1
         else:
@@ -177,7 +175,8 @@ def inject_jackson_into_defects4j_shared_build(jackson_version: str = "2.13.0") 
     that are used by all bugs of each project. It prevents duplicate injection
     by checking if Jackson properties and paths already exist.
     """
-    from .ant import inject_jackson_into_defects4j_shared_build as _inject_shared
-    _inject_shared(jackson_version)
+    shared_file = "/defects4j/framework/projects/defects4j.build.xml"
+    if not verify_jackson_in_defects4j_shared_build(jackson_version):
+        add_jackson_to_build_file(shared_file, jackson_version)
 
 

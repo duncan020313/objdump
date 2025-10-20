@@ -11,7 +11,7 @@ from jt_types import BuildSystem
 import defects4j
 from build_systems import detect, find_all_build_files, inject_jackson_into_all_build_files, inject_jackson_into_defects4j_shared_build
 from build_systems.maven import add_dependencies as add_maven
-from build_systems.ant import add_dependencies as add_ant
+from build_systems.ant import process_all_ant_files_in_dir as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
 from instrumentation.instrumenter import instrument_changed_methods, copy_java_template_to_classdir
@@ -198,9 +198,7 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", s
     
     # Fix encoding and nowarn attributes in individual build files
     classes_dir = defects4j.get_source_classes_dir(work_dir)
-    build_xml = os.path.join(work_dir, "build.xml")
-    if os.path.isfile(build_xml):
-        add_ant(build_xml, jackson_version, classes_dir)
+    add_ant(work_dir, jackson_version, classes_dir)
     
     # Inject Jackson into Defects4J shared build files (centralized approach)
     # Skip this if already done at the matrix level for efficiency
