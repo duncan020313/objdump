@@ -221,7 +221,7 @@ public class CodeTransformer {
         // Generate parameter map
         newBody.addStatement(createParamMapDeclaration());
         for (int i = 0; i < parameters.size(); i++) {
-            newBody.addStatement(createParamPut(i, parameters.get(i).getNameAsString()));
+            newBody.addStatement(createParamPut(i, sanitizeParamName(parameters.get(i).getNameAsString())));
         }
         
         // Write entry log
@@ -304,7 +304,7 @@ public class CodeTransformer {
         newBody.addStatement(createIdDeclaration());
         newBody.addStatement(createParamMapDeclaration());
         for (int i = 0; i < parameters.size(); i++) {
-            newBody.addStatement(createParamPut(i, parameters.get(i).getNameAsString()));
+            newBody.addStatement(createParamPut(i, sanitizeParamName(parameters.get(i).getNameAsString())));
         }
         newBody.addStatement(createEntryCall(false, constructorSignature, filePath));
         
@@ -656,7 +656,7 @@ public class CodeTransformer {
             if (param.isVarArgs()) {
                 sig.append("...");
             }
-            sig.append(" ").append(param.getName().asString());
+            sig.append(" ").append(sanitizeParamName(param.getName().asString()));
             first = false;
         }
         sig.append(")");
@@ -679,7 +679,7 @@ public class CodeTransformer {
             if (param.isVarArgs()) {
                 sig.append("...");
             }
-            sig.append(" ").append(param.getName().asString());
+            sig.append(" ").append(sanitizeParamName(param.getName().asString()));
             first = false;
         }
         sig.append(")");
@@ -715,6 +715,13 @@ public class CodeTransformer {
         }
         
         return "Unknown.java";
+    }
+    
+    /**
+     * Sanitize parameter name to allow only alphabetic characters
+     */
+    private static String sanitizeParamName(String paramName) {
+        return paramName.replaceAll("[^a-zA-Z]", "");
     }
     
     /**

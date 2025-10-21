@@ -106,6 +106,13 @@ public class MethodExtractor {
     }
     
     /**
+     * Sanitize parameter name to allow only alphabetic characters
+     */
+    private static String sanitizeParamName(String paramName) {
+        return paramName.replaceAll("[^a-zA-Z]", "");
+    }
+    
+    /**
      * Normalize parameter type by removing 'final' modifier
      */
     private static String normalizeType(String typeString) {
@@ -150,7 +157,7 @@ public class MethodExtractor {
             if (param.isVarArgs()) {
                 sig.append("...");
             }
-            sig.append(" ").append(param.getName().asString());
+            sig.append(" ").append(sanitizeParamName(param.getName().asString()));
             first = false;
         }
         sig.append(")");
@@ -178,7 +185,7 @@ public class MethodExtractor {
             if (param.isVarArgs()) {
                 sig.append("...");
             }
-            sig.append(" ").append(param.getName().asString());
+            sig.append(" ").append(sanitizeParamName(param.getName().asString()));
             first = false;
         }
         sig.append(")");
