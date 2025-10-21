@@ -82,6 +82,7 @@ def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inject Jackson and instrument Defects4J projects")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_all = sub.add_parser("all", help="Run full workflow: checkout, inject, instrument, tests")
@@ -124,9 +125,9 @@ def main() -> None:
 
     args = parser.parse_args()
     
-    configure_logging()
+    configure_logging(debug=args.debug)
     log = logging.getLogger("cli")
-    
+
     if not build_java_instrumenter():
         log.error("Failed to build Java instrumenter. Exiting.")
         sys.exit(1)

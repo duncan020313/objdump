@@ -41,12 +41,12 @@ class TqdmLogHandler(logging.StreamHandler):
             self.handleError(record)
 
 
-def configure_logging() -> None:
+def configure_logging(debug: bool = False) -> None:
     """Configure root logger for structured, concise output with colored log levels.
 
     Uses INFO by default; DEBUG if JI_DEBUG env var is set.
     """
-    level = logging.DEBUG if os.getenv("JI_DEBUG") else logging.INFO
+    level = logging.DEBUG if debug else logging.INFO
     
     # Create a custom handler with colored formatter that uses tqdm.write
     handler = TqdmLogHandler()
