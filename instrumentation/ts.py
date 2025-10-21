@@ -3,6 +3,8 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from tree_sitter import Parser
 from tree_sitter_languages import get_language
+import logging
+log = logging.getLogger(__name__)
 
 
 def extract_changed_methods(java_source: str, changed_ranges: List[Tuple[int, int]]) -> List[str]:
@@ -51,6 +53,10 @@ def extract_changed_methods(java_source: str, changed_ranges: List[Tuple[int, in
             c = node.child(i)
             if c is not None:
                 stack.append(c)
+
+    if len(method_signatures) == 0:
+        log.warning(f"No method signatures found in {java_source}. changed_ranges: {changed_ranges}")
+        return []
 
     return sorted(method_signatures)
 

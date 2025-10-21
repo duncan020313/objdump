@@ -3,9 +3,13 @@ import os
 import instrumentation.ts as ts  # for typing-only coupling avoidance
 from subprocess import run as sprun, PIPE
 
+import logging
+log = logging.getLogger(__name__)
+
 
 def parse_unified_diff_hunks_both(diff_text: str) -> Dict[str, List[Tuple[int, int]]]:
     """Parse unified diff; return {'left': [(s,e)], 'right': [(s,e)]}."""
+    log.debug(f"Parsing unified diff: {diff_text}")
     left_hunks: List[Tuple[int, int]] = []
     right_hunks: List[Tuple[int, int]] = []
     

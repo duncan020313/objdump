@@ -529,6 +529,12 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     # Step 5: Generate instrumentation report
     generate_instrumentation_report(instrumented_map, work_dir, report_file)
     
+    # Check if any methods were instrumented
+    total_instrumented = sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
+    if total_instrumented == 0:
+        log.info("No methods were instrumented, skipping test execution")
+        return
+    
     # Step 6: Run tests
     test_results = run_tests(work_dir)
     
@@ -588,14 +594,24 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
 
     # Step 4: Instrument changed methods
     instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir)
+    total_instrumented = sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
     status["stages"]["instrument"] = {
         "status": "ok",
         "methods_found": len([k for k, v in instrumented_map.items() if v]) if instrumented_map else 0,
-        "methods_instrumented": sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
+        "methods_instrumented": total_instrumented
     }
-    
+
     # Generate instrumentation report (best-effort)
     generate_instrumentation_report(instrumented_map, work_dir, report_file)
+
+    # Check if any methods were instrumented
+    if total_instrumented == 0:
+        log.info("No methods were instrumented, skipping test execution")
+        status["stages"]["tests"]["status"] = "skipped"
+        status["stages"]["tests"]["reason"] = "No methods instrumented"
+        status["stages"]["rebuild"] = "skipped"
+        status["stages"]["collect_dumps"] = {"status": "skipped", "reason": "No methods instrumented"}
+        return status
 
     # Step 5: Rebuild after instrumentation
     rebuild_success, rebuild_out, rebuild_err = defects4j.compile(work_dir, env={"OBJDUMP_OUT": os.path.join(work_dir, "dump.json")})
