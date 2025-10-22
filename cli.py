@@ -18,6 +18,26 @@ import classification
 from logging_setup import configure_logging
 import merger
 
+PROJECTS = [
+    "Chart",
+    "Cli",
+    "Closure",
+    "Codec",
+    "Collections",
+    "Compress",
+    "Csv",
+    "Gson",
+    "JacksonCore",
+    "JacksonDatabind",
+    "JacksonXml",
+    "Jsoup",
+    "JxPath",
+    "Lang",
+    "Math",
+    "Mockito",
+    "Time"
+]
+
 def build_java_instrumenter() -> bool:
     """Build the Java instrumenter using Maven.
     
@@ -136,6 +156,9 @@ def main() -> None:
         run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.report_file)
     elif args.cmd == "matrix":
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
+        if not projects:
+            projects = PROJECTS
+            
         os.makedirs(args.reports_dir, exist_ok=True)
         
         # Load valid bugs from CSV
@@ -250,31 +273,11 @@ def main() -> None:
                 log.error(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
                 return
         else:
-            projects = [
-                "Chart",
-                "Cli",
-                "Closure",
-                "Codec",
-                "Collections",
-                "Compress",
-                "Csv",
-                "Gson",
-                "JacksonCore",
-                "JacksonDatabind",
-                "JacksonXml",
-                "Jsoup",
-                "JxPath",
-                "Lang",
-                "Math",
-                "Mockito",
-                "Time"
-            ]
-            
-            log.info(f"Classifying bugs for projects: {', '.join(projects)}")
+            log.info(f"Classifying bugs for projects: {', '.join(PROJECTS)}")
             log.info(f"Using {args.workers} parallel workers")
             
             # Use the classification module
-            all_results = classification.classify_projects(projects, args.max_bugs_per_project, args.workers)
+            all_results = classification.classify_projects(PROJECTS, args.max_bugs_per_project, args.workers)
             
         if args.filter_functional:
             all_results = classification.filter_functional_bugs(all_results)

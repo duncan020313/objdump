@@ -18,6 +18,8 @@ def detect(project_dir: str) -> Optional[BuildSystem]:
     p = Path(project_dir)
     if (p / "pom.xml").is_file():
         return BuildSystem.MAVEN
+    elif (p / "build.gradle").is_file():
+        return BuildSystem.GRADLE
     return BuildSystem.ANT
 
 

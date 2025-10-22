@@ -6,6 +6,7 @@ from typing import List
 class BuildSystem(str, Enum):
     MAVEN = "maven"
     ANT = "ant"
+    GRADLE = "gradle"
 
 
 @dataclass

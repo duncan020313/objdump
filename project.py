@@ -9,7 +9,8 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
-from build_systems import detect, find_all_build_files
+from build_systems import detect
+from build_systems.gradle import setup_jackson_dependencies as setup_gradle_jackson
 from build_systems.maven import setup_jackson_dependencies as setup_maven_jackson
 from build_systems.ant import process_all_ant_files_in_dir as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
@@ -115,6 +116,9 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
     if build_system == BuildSystem.MAVEN:
         log.info("Detected Maven build system")
         setup_maven_jackson(work_dir, jackson_version)
+    elif build_system == BuildSystem.GRADLE:
+        log.info("Detected Gradle build system")
+        setup_gradle_jackson(work_dir, jackson_version)
     elif build_system == BuildSystem.ANT:
         log.info("Detected Ant build system")
         download_jackson_jars(work_dir, jackson_version)
