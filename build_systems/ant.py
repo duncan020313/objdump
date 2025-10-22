@@ -99,91 +99,60 @@ def _ensure_properties(root: ET._Element, properties: Dict[str, str]) -> bool:
             root.insert(insert_idx, el)
             insert_idx += 1
             modified = True
-            log.info(f"Added property: {name}={value}")
-    
     return modified
 
 
-def _ensure_build_classpath(root: ET._Element, jackson_version: str) -> bool:
+def _ensure_jackson_in_classpaths(root: ET._Element, jackson_version: str) -> bool:
     """
-    Ensures that all build.classpath definitions include Jackson libraries.
-    If multiple build.classpath definitions exist, adds Jackson to all of them.
+    Ensures that build.classpath, compile.classpath, and test.classpath all include Jackson libraries.
+    Only adds to existing classpaths without creating new ones or overwriting existing elements.
     
     Args:
         root: The XML root element.
         jackson_version: The Jackson version to use.
     
     Returns:
-        True if classpath was modified, False otherwise.
+        True if any classpath was modified, False otherwise.
     """
     modified = False
     
-    # Find ALL build.classpath definitions (including nested ones)
-    all_classpaths = []
-    for path in root.findall('.//path'):
-        if path.get('id') == 'build.classpath':
-            all_classpaths.append(path)
+    # Target classpaths to update
+    target_classpaths = ['build.classpath', 'compile.classpath', 'test.classpath']
     
-    if len(all_classpaths) > 1:
-        log.info(f"Found {len(all_classpaths)} build.classpath definitions, adding Jackson to all")
+    # Jackson JARs to add
+    jackson_jars = [
+        '${jackson.core.jar}',
+        '${jackson.databind.jar}',
+        '${jackson.annotations.jar}'
+    ]
     
-    # Add Jackson to all existing classpaths
-    if all_classpaths:
-        for existing_path in all_classpaths:
+    # Find ALL classpath definitions (including nested ones)
+    for classpath_id in target_classpaths:
+        classpaths = []
+        for path in root.findall('.//path'):
+            if path.get('id') == classpath_id:
+                classpaths.append(path)
+        
+        if len(classpaths) > 1:
+            log.info(f"Found {len(classpaths)} {classpath_id} definitions, adding Jackson to all")
+        
+        # Add Jackson to all existing classpaths
+        for existing_path in classpaths:
             # Skip if it's just a reference (has refid)
             if 'refid' in existing_path.attrib:
-                log.info("Skipping build.classpath with refid")
+                log.info(f"Skipping {classpath_id} with refid")
                 continue
             
-            # Add missing Jackson jars to this classpath
+            # Get existing locations
             existing_locations = {pe.get('location') for pe in existing_path.findall('pathelement')}
-            jackson_jars = [
-                '${jackson.core.jar}',
-                '${jackson.databind.jar}',
-                '${jackson.annotations.jar}'
-            ]
             
+            # Add missing Jackson jars
             for jar in jackson_jars:
                 if jar not in existing_locations:
                     el = ET.SubElement(existing_path, 'pathelement', {'location': jar})
                     el.tail = "\n        "
                     modified = True
-                    log.info(f"Added {jar} to build.classpath")
-    else:
-        # No build.classpath exists, create new one
-        # Find insertion point - after properties, before targets
-        insert_idx = len(root)
-        for i, child in enumerate(root):
-            if child.tag == 'target':
-                insert_idx = i
-                break
-        
-        # Add comment
-        comment = ET.Comment(' Override build.classpath to include Jackson libraries ')
-        comment.tail = "\n    "
-        root.insert(insert_idx, comment)
-        insert_idx += 1
-        
-        # Create path element
-        path = ET.Element('path', {'id': 'build.classpath'})
-        path.text = "\n        "
-        path.tail = "\n    \n"
-        
-        # Add servlet.jar
-        el = ET.SubElement(path, 'pathelement', {'location': '${servlet.jar}'})
-        el.tail = "\n        "
-        
-        # Add Jackson jars
-        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.core.jar}'})
-        el.tail = "\n        "
-        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.databind.jar}'})
-        el.tail = "\n        "
-        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.annotations.jar}'})
-        el.tail = "\n    "
-        
-        root.insert(insert_idx, path)
-        modified = True
-        log.info("Created build.classpath with Jackson libraries")
+                    log.info(f"Added {jar} to {classpath_id}")
     
     return modified
 
@@ -275,7 +244,7 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
         }
         
         modified1 = _ensure_properties(root, properties)
-        modified2 = _ensure_build_classpath(root, jackson_version)
+        modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
         modified3 = _add_instrument_include_to_javac(root)
         
         return modified1 or modified2 or modified3
@@ -334,7 +303,7 @@ def add_jackson_to_project_template(build_file_path: str, jackson_version: str =
             modified = True
         
         modified1 = _ensure_properties(root, properties)
-        modified2 = _ensure_build_classpath(root, jackson_version)
+        modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
         modified3 = _add_instrument_include_to_javac(root)
         
         return modified or modified1 or modified2 or modified3

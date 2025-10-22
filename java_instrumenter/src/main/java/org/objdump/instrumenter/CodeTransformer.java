@@ -721,7 +721,7 @@ public class CodeTransformer {
      * Sanitize parameter name to allow only alphabetic characters
      */
     private static String sanitizeParamName(String paramName) {
-        return paramName.replaceAll("[^a-zA-Z]", "");
+        return paramName.replaceAll("[^a-zA-Z0-9]", "");
     }
     
     /**
