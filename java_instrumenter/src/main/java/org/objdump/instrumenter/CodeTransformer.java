@@ -233,6 +233,7 @@ public class CodeTransformer {
         }
         
         // Get original body statements
+        boolean blockTerminated = false;
         if (method.getBody().isPresent()) {
             BlockStmt originalBody = method.getBody().get();
             
@@ -251,10 +252,16 @@ public class CodeTransformer {
             for (Statement stmt : transformedStatements) {
                 newBody.addStatement(stmt);
             }
+            
+            // Check if block is terminated with return/throw
+            if (!transformedStatements.isEmpty()) {
+                Statement lastStmt = transformedStatements.get(transformedStatements.size() - 1);
+                blockTerminated = isTerminatingStatement(lastStmt);
+            }
         }
         
-        // Add exit log at end for void methods (if not already there)
-        if (isVoid) {
+        // Add exit log at end for void methods only if block is not already terminated
+        if (isVoid && !blockTerminated) {
             newBody.addStatement(createExitCall(isStatic, null, methodSignature, filePath));
         }
         
@@ -326,14 +333,41 @@ public class CodeTransformer {
             }
         }
         
-        // Add exit log at end
-        newBody.addStatement(createExitCall(false, null, constructorSignature, filePath));
+        // Check if block is terminated with return/throw
+        boolean blockTerminated = false;
+        if (!newBody.getStatements().isEmpty()) {
+            Statement lastStmt = newBody.getStatements().get(newBody.getStatements().size() - 1);
+            blockTerminated = isTerminatingStatement(lastStmt);
+        }
+        
+        // Add exit log at end only if block is not already terminated
+        if (!blockTerminated) {
+            newBody.addStatement(createExitCall(false, null, constructorSignature, filePath));
+        }
         
         constructor.setBody(newBody);
     }
     
     /**
-     * Transform statements, handling return statements specially
+     * Check if a statement is a terminating statement (return or throw)
+     */
+    private static boolean isTerminatingStatement(Statement stmt) {
+        if (stmt instanceof ReturnStmt || stmt instanceof ThrowStmt) {
+            return true;
+        }
+        // Check if it's a block that ends with a terminating statement
+        if (stmt instanceof BlockStmt) {
+            BlockStmt block = (BlockStmt) stmt;
+            if (!block.getStatements().isEmpty()) {
+                Statement lastStmt = block.getStatements().get(block.getStatements().size() - 1);
+                return isTerminatingStatement(lastStmt);
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Transform statements, handling return and throw statements specially
      */
     private static List<Statement> transformStatementsWithReturns(NodeList<Statement> statements, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar, String methodSignature, String filePath) {
         List<Statement> transformed = new ArrayList<>();
@@ -365,6 +399,14 @@ public class CodeTransformer {
                     // Return the variable
                     transformed.add(new ReturnStmt(new NameExpr("__objdump_ret")));
                 }
+                // Stop processing further statements after return (unreachable code)
+                break;
+            } else if (stmt instanceof ThrowStmt) {
+                // Add exit log before throw
+                transformed.add(createExitCall(isStatic, null, methodSignature, filePath));
+                transformed.add(stmt);
+                // Stop processing further statements after throw (unreachable code)
+                break;
             } else {
                 // Recursively transform nested blocks
                 if (stmt instanceof BlockStmt) {
@@ -470,8 +512,8 @@ public class CodeTransformer {
             BlockStmt block = (BlockStmt) stmt;
             List<Statement> transformed = transformStatementsWithReturns(block.getStatements(), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
             return new BlockStmt(new NodeList<>(transformed));
-        } else if (stmt instanceof ReturnStmt) {
-            // Handle single return statement (not in a block)
+        } else if (stmt instanceof ReturnStmt || stmt instanceof ThrowStmt) {
+            // Handle single return/throw statement (not in a block)
             List<Statement> transformed = transformStatementsWithReturns(new NodeList<>(stmt), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
             // Wrap in block if multiple statements were generated
             if (transformed.size() == 1) {

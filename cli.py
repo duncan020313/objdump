@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from instrumentation.post_processor import post_process_dump_files
 from typing import List, Dict, Any, Set, Tuple
 from reports import write_json, write_markdown_table
-from build_systems import inject_jackson_into_defects4j_shared_build
 from reports import write_summary_statistics, write_detailed_errors
 from tqdm import tqdm
 
@@ -145,13 +144,6 @@ def main() -> None:
         # Set environment variable for centralized dumps directory
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
         log.info(f"Dump files will be collected to: {args.dumps_dir}")
-
-        # Inject Jackson into Defects4J shared build files once per project
-        # This is more efficient than doing it for each individual bug
-        
-        log.info("Injecting Jackson dependencies into Defects4J shared build files...")
-        inject_jackson_into_defects4j_shared_build(args.jackson_version)
-        log.info("Jackson injection completed for all projects")
 
         results: List[Dict[str, Any]] = []
         

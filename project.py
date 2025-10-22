@@ -9,8 +9,8 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
-from build_systems import detect, find_all_build_files, inject_jackson_into_all_build_files, inject_jackson_into_defects4j_shared_build
-from build_systems.maven import add_dependencies as add_maven
+from build_systems import detect, find_all_build_files
+from build_systems.maven import setup_jackson_dependencies as setup_maven_jackson
 from build_systems.ant import process_all_ant_files_in_dir as add_ant
 from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
@@ -31,74 +31,6 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
         (f"jackson-annotations-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-annotations/{version}/jackson-annotations-{version}.jar"),
     ]
     download_files(lib_dir, items)
-
-
-def validate_jackson_classpath(work_dir: str, jackson_version: str = "2.13.0") -> bool:
-    """Verify Jackson jars are in project classpath and accessible."""
-    lib_dir = os.path.join(work_dir, "lib")
-    required_jars = [
-        f"jackson-core-{jackson_version}.jar",
-        f"jackson-databind-{jackson_version}.jar", 
-        f"jackson-annotations-{jackson_version}.jar"
-    ]
-    
-    # Check if jars exist
-    for jar in required_jars:
-        jar_path = os.path.join(lib_dir, jar)
-        if not os.path.isfile(jar_path):
-            log.error(f"Missing JAR: {jar_path}")
-            return False
-    
-    # Check if jars are referenced in build files
-    # Find all build files that might contain Jackson references
-    all_build_files = find_all_build_files(work_dir)
-    
-    # Check each build file for Jackson references
-    for build_file in all_build_files:
-        if os.path.isfile(build_file):
-            try:
-                with open(build_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # For Maven POM files, check for jackson in dependencies
-                    if build_file.endswith('pom.xml'):
-                        if "jackson" not in content.lower():
-                            log.error(f"Missing Jackson in POM: {build_file}")
-                            return False
-                    # For Ant build files (including maven-build.xml), check for jar references
-                    elif build_file.endswith('.xml'):
-                        # Check if any of the required jars are referenced
-                        jar_found = False
-                        for jar in required_jars:
-                            if jar in content:
-                                jar_found = True
-                                break
-                        if not jar_found:
-                            log.error(f"Missing Jackson JARs in build file: {build_file}")
-                            return False
-            except (IOError, UnicodeDecodeError):
-                # If we can't read the file, skip it but don't fail validation
-                log.warning(f"Could not read build file: {build_file}")
-                continue
-    
-    # Special check for defects4j.build.xml which is critical
-    defects4j_build = os.path.join(work_dir, "defects4j.build.xml")
-    if os.path.isfile(defects4j_build):
-        try:
-            with open(defects4j_build, 'r', encoding='utf-8') as f:
-                content = f.read()
-                jar_found = False
-                for jar in required_jars:
-                    if jar in content:
-                        jar_found = True
-                        break
-                if not jar_found:
-                    log.error(f"Missing Jackson JARs in defects4j.build.xml: {defects4j_build}")
-                    return False
-        except (IOError, UnicodeDecodeError):
-            log.warning(f"Could not read defects4j.build.xml: {defects4j_build}")
-    
-    return True
-
 
 def extract_compilation_errors(work_dir: str) -> str:
     """Extract compilation errors from build output."""
@@ -175,39 +107,19 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     return work_dir, fixed_dir
 
 
-def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", skip_shared_build_injection: bool = False, project_id: Optional[str] = None) -> None:
+def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -> None:
     """Setup Jackson dependencies for the project."""
     
-    # Inject Jackson into project template build files first
-    if project_id:
-        log.info(f"Injecting Jackson into project template for {project_id}")
-        from build_systems import inject_jackson_into_project_templates
-        inject_jackson_into_project_templates([project_id], jackson_version)
-    else:
-        log.info("No project ID provided, skipping project template injection")
-    
     build_system = detect(work_dir)
+    classes_dir = defects4j.get_source_classes_dir(work_dir)
     if build_system == BuildSystem.MAVEN:
         log.info("Detected Maven build system")
-        pom_path = os.path.join(work_dir, "pom.xml")
-        add_maven(pom_path, jackson_version)
+        setup_maven_jackson(work_dir, jackson_version)
     elif build_system == BuildSystem.ANT:
         log.info("Detected Ant build system")
-    else:
-        log.info("Unknown build system, trying Ant-style injection")
-    
-    # Fix encoding and nowarn attributes in individual build files
-    classes_dir = defects4j.get_source_classes_dir(work_dir)
-    add_ant(work_dir, jackson_version, classes_dir)
-    
-    # Inject Jackson into Defects4J shared build files (centralized approach)
-    # Skip this if already done at the matrix level for efficiency
-    if not skip_shared_build_injection:
-        log.info("Injecting Jackson into Defects4J shared build files")
-        inject_jackson_into_defects4j_shared_build(jackson_version)
-    download_jackson_jars(work_dir, jackson_version)
+        download_jackson_jars(work_dir, jackson_version)
+        add_ant(work_dir, jackson_version, classes_dir)
     copy_java_template_to_classdir(work_dir, classes_dir)
-
 
 def compile_project(work_dir: str) -> bool:
     """Compile the project and return success status."""
@@ -513,7 +425,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
     buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
     
     # Step 2: Setup Jackson dependencies
-    setup_jackson_dependencies(work_dir, jackson_version, project_id=project_id)
+    setup_jackson_dependencies(work_dir, jackson_version)
     
     # Step 3: Compile project
     if not compile_project(work_dir):
@@ -566,7 +478,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     status["stages"]["checkout"] = "ok"
     
     # Step 2: Setup Jackson dependencies
-    setup_jackson_dependencies(work_dir, jackson_version, skip_shared_build_injection, project_id)
+    setup_jackson_dependencies(work_dir, jackson_version)
     status["stages"]["jackson"] = "ok"
     
     # Step 3: Compile project
@@ -578,15 +490,6 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
         "status": "ok",
         "java_version": detect_java_version(work_dir)
     }
-    
-    # Post-compile Jackson re-injection for newly generated build files
-    try:
-        inject_jackson_into_all_build_files(work_dir, jackson_version)
-        # Re-validate Jackson classpath after re-injection
-        if not validate_jackson_classpath(work_dir, jackson_version):
-            log.warning("Jackson classpath validation failed after re-injection")
-    except Exception as e:
-        log.warning(f"Post-compile Jackson re-injection failed: {e}")
 
     # Step 4: Instrument changed methods
     instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir)
