@@ -4,14 +4,16 @@ Defects4J Shared Build Setup Script
 
 This script automatically sets up the Defects4J shared build file with Jackson dependencies.
 It handles backup, patching, verification, and rollback functionality.
+Additionally, it patches all project-specific template build files to ensure proper compilation.
 
 Usage:
-    python3 setup_defects4j.py [--rollback] [--verify] [--force]
+    python3 setup_defects4j.py [--rollback] [--verify] [--force] [--patch-projects]
 
 Options:
-    --rollback    Restore the original defects4j.build.xml file
-    --verify      Only verify the current setup without making changes
-    --force       Force re-application even if already patched
+    --rollback         Restore the original defects4j.build.xml file
+    --verify           Only verify the current setup without making changes
+    --force            Force re-application even if already patched
+    --patch-projects   Also patch all project-specific template build files
 """
 
 import os
@@ -20,10 +22,12 @@ import shutil
 import argparse
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from pathlib import Path
 
 
 # Configuration
 DEFECTS4J_BUILD_FILE = "/defects4j/framework/projects/defects4j.build.xml"
+DEFECTS4J_PROJECTS_DIR = "/defects4j/framework/projects"
 BACKUP_SUFFIX = ".backup"
 JACKSON_VERSION = "2.13.0"
 
@@ -241,6 +245,84 @@ def apply_jackson_patch():
         return False
 
 
+def find_project_build_files():
+    """Find all project-specific template build files."""
+    project_files = []
+    projects_path = Path(DEFECTS4J_PROJECTS_DIR)
+    
+    if not projects_path.exists():
+        log(f"Projects directory not found: {DEFECTS4J_PROJECTS_DIR}", "WARNING")
+        return project_files
+    
+    # Find all *.build.xml files in project subdirectories
+    for project_dir in projects_path.iterdir():
+        if not project_dir.is_dir():
+            continue
+        
+        # Look for Project.build.xml (e.g., Chart.build.xml)
+        for build_file in project_dir.glob("*.build.xml"):
+            # Skip defects4j.build.xml and template.build.xml
+            if build_file.name not in ["defects4j.build.xml", "template.build.xml"]:
+                project_files.append(str(build_file))
+    
+    return sorted(project_files)
+
+
+def patch_project_build_file(build_file_path: str):
+    """
+    Patch a project-specific build file to:
+    1. Add Jackson dependencies to build.classpath
+    2. Change compile target javac to use compile.classpath
+    3. Add org/instrument/** to javac includes
+    """
+    try:
+        # Import ant module functions
+        sys.path.insert(0, '/root/objdump')
+        from build_systems.ant import add_jackson_to_project_template
+        
+        log(f"Patching: {build_file_path}")
+        result = add_jackson_to_project_template(build_file_path, JACKSON_VERSION)
+        
+        if result:
+            log(f"✓ Successfully patched: {build_file_path}")
+            return True
+        else:
+            log(f"⚠ No changes needed for: {build_file_path}")
+            return True
+            
+    except Exception as e:
+        log(f"✗ Failed to patch {build_file_path}: {e}", "ERROR")
+        return False
+
+
+def patch_all_project_build_files():
+    """Patch all project-specific template build files."""
+    log("Patching project-specific build files...")
+    log("-" * 40)
+    
+    project_files = find_project_build_files()
+    
+    if not project_files:
+        log("No project build files found", "WARNING")
+        return False
+    
+    log(f"Found {len(project_files)} project build files")
+    
+    success_count = 0
+    fail_count = 0
+    
+    for build_file in project_files:
+        if patch_project_build_file(build_file):
+            success_count += 1
+        else:
+            fail_count += 1
+    
+    log("-" * 40)
+    log(f"Patching complete: {success_count} successful, {fail_count} failed")
+    
+    return fail_count == 0
+
+
 def verify_setup():
     """Verify that the Jackson setup is working correctly."""
     log("Verifying Defects4J Jackson setup...")
@@ -270,6 +352,7 @@ def main():
     parser.add_argument('--rollback', action='store_true', help='Restore original build file from backup')
     parser.add_argument('--verify', action='store_true', help='Only verify current setup')
     parser.add_argument('--force', action='store_true', help='Force re-application even if already patched')
+    parser.add_argument('--patch-projects', action='store_true', help='Also patch all project-specific template build files')
     
     args = parser.parse_args()
     
@@ -299,10 +382,35 @@ def main():
             log("Setup verification failed", "ERROR")
             sys.exit(1)
     
+    # Handle project patching only
+    if args.patch_projects and not args.force:
+        log("Patching project-specific build files only...")
+        log("=" * 40)
+        if patch_all_project_build_files():
+            log("=" * 40)
+            log("Project build files patched successfully!")
+            sys.exit(0)
+        else:
+            log("=" * 40)
+            log("Some project build files failed to patch", "WARNING")
+            sys.exit(1)
+    
     # Check if already patched
     if is_already_patched() and not args.force:
         log("Defects4J build file is already patched with Jackson dependencies")
         log("Use --force to re-apply the patch")
+        
+        # If patch-projects is specified, still patch project files
+        if args.patch_projects:
+            log("")
+            log("=" * 40)
+            if patch_all_project_build_files():
+                log("=" * 40)
+                log("Project build files patched successfully!")
+            else:
+                log("=" * 40)
+                log("Some project build files failed to patch", "WARNING")
+        
         sys.exit(0)
     
     # Create backup
@@ -320,7 +428,22 @@ def main():
         if verify_setup():
             log("Setup completed successfully!")
             log(f"Backup saved as: {backup_file}")
-            log("You can now use the objdump CLI with Defects4J projects")
+            
+            # If patch-projects is specified, also patch project files
+            if args.patch_projects:
+                log("")
+                log("=" * 40)
+                if patch_all_project_build_files():
+                    log("=" * 40)
+                    log("All patching completed successfully!")
+                    log("You can now use the objdump CLI with Defects4J projects")
+                else:
+                    log("=" * 40)
+                    log("Setup completed but some project files failed to patch", "WARNING")
+            else:
+                log("You can now use the objdump CLI with Defects4J projects")
+                log("")
+                log("TIP: Run with --patch-projects to also patch project-specific build files")
         else:
             log("Setup completed but verification failed", "WARNING")
             log("You may need to check the configuration manually")

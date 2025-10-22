@@ -205,13 +205,7 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0", s
     if not skip_shared_build_injection:
         log.info("Injecting Jackson into Defects4J shared build files")
         inject_jackson_into_defects4j_shared_build(jackson_version)
-    else:
-        log.info("Skipping shared build injection (already done at matrix level)")
-
-    # Always ensure JARs present under lib/ for Ant-driven builds
-    log.info("Downloading Jackson JAR files")
     download_jackson_jars(work_dir, jackson_version)
-    
     copy_java_template_to_classdir(work_dir, classes_dir)
 
 
@@ -242,6 +236,8 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, 
 
     classes_dir = defects4j.get_source_classes_dir(work_dir)
     modified_class_paths = to_path(classes_dir, modified_classes) if classes_dir and modified_classes else []
+    
+    log.info(f"# of modified classes: {len(modified_class_paths)}")
 
     changed: Dict[str, List[str]] = {}
     # compute changes

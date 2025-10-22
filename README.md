@@ -24,17 +24,27 @@ The objdump tool requires Jackson dependencies to be available in the Defects4J 
 
 ### Quick Setup (Recommended)
 
-Use the automated setup script:
+Use the automated setup script to patch both shared and project-specific build files:
 
 ```bash
-python3 setup_defects4j.py
+python3 setup_defects4j.py --patch-projects
 ```
 
 This script will:
 - Create a backup of the original Defects4J build file
 - Apply Jackson dependency patches automatically
+- Patch all project-specific template build files (Chart, Math, Lang, etc.)
+- Add `org/instrument/**` to javac include patterns to compile instrumentation code
 - Verify the setup is working correctly
 - Handle idempotent execution (safe to run multiple times)
+
+### Shared Build File Only
+
+To patch only the shared build file without project-specific files:
+
+```bash
+python3 setup_defects4j.py
+```
 
 ### Verification
 
@@ -51,6 +61,20 @@ If you need to restore the original Defects4J build file:
 ```bash
 python3 setup_defects4j.py --rollback
 ```
+
+### Advanced Options
+
+```bash
+# Force re-patching even if already patched
+python3 setup_defects4j.py --force --patch-projects
+
+# Only patch project-specific files (if shared build is already patched)
+python3 setup_defects4j.py --patch-projects
+```
+
+⚠️ **Important**: The automatic patching script may remove XML comments and license headers from build files. After running `--patch-projects`, review changes with `git diff` and manually restore any lost license headers if necessary. Chart.build.xml has been manually patched to preserve its license header.
+
+For detailed information about the patching process and troubleshooting, see [DEFECTS4J_PATCH_GUIDE.md](DEFECTS4J_PATCH_GUIDE.md).
 
 ### What Gets Modified
 

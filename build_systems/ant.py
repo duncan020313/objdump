@@ -1,4 +1,4 @@
-import xml.etree.ElementTree as ET
+from lxml import etree as ET
 from pathlib import Path
 import os
 import logging
@@ -10,9 +10,10 @@ logging.basicConfig(level=logging.INFO)
 
 # --- Helper Functions ---
 
-def _process_build_file(build_xml_path: str, modifier_func: Callable[[ET.Element], bool]) -> bool:
+def _process_build_file(build_xml_path: str, modifier_func: Callable[[ET._Element], bool]) -> bool:
     """
     Reads an XML build file, modifies it using a given function, and saves it only if changes were made.
+    Uses lxml to preserve comments and formatting.
 
     Args:
         build_xml_path: Path to the build file.
@@ -28,12 +29,19 @@ def _process_build_file(build_xml_path: str, modifier_func: Callable[[ET.Element
         return False
 
     try:
-        tree = ET.parse(build_xml_path)
+        # Parse with lxml to preserve comments
+        parser = ET.XMLParser(remove_blank_text=False, remove_comments=False)
+        tree = ET.parse(build_xml_path, parser)
         root = tree.getroot()
 
         if modifier_func(root):
-            # Write the file with utf-8 encoding and XML declaration.
-            tree.write(build_xml_path, encoding='utf-8', xml_declaration=True)
+            # Write with pretty_print to maintain formatting
+            tree.write(
+                build_xml_path,
+                encoding='utf-8',
+                xml_declaration=True,
+                pretty_print=False  # Keep original formatting
+            )
             log.info(f"Successfully modified file: {build_xml_path}")
             return True
         else:
@@ -46,7 +54,8 @@ def _process_build_file(build_xml_path: str, modifier_func: Callable[[ET.Element
         log.error(f"Error modifying file {build_xml_path}: {e}")
         return False
 
-def _ensure_properties(root: ET.Element, properties: Dict[str, str]) -> bool:
+
+def _ensure_properties(root: ET._Element, properties: Dict[str, str]) -> bool:
     """
     Ensures that the specified properties exist in the XML root, adding them if they are missing.
 
@@ -58,113 +67,189 @@ def _ensure_properties(root: ET.Element, properties: Dict[str, str]) -> bool:
         True if one or more properties were added, False otherwise.
     """
     modified = False
-    existing_props = {prop.attrib.get('name') for prop in root.findall('property')}
+    existing_props = {prop.get('name') for prop in root.findall('property')}
     
-    # Calculate insertion index (before the first 'path' or 'target' tag)
-    insert_idx = len(list(root))
+    # Find insertion point - after the last property element or before first path/target
+    insert_idx = 0
     for i, child in enumerate(root):
-        if child.tag in ('path', 'target'):
-            insert_idx = i
+        if child.tag == 'property':
+            insert_idx = i + 1
+        elif child.tag in ('path', 'target'):
+            if insert_idx == 0:
+                insert_idx = i
             break
-            
-    for name, value in reversed(properties.items()): # Insert in reverse to maintain order
+    else:
+        insert_idx = len(root)
+    
+    # Add missing properties with proper formatting
+    for name, value in properties.items():
         if name not in existing_props:
-            el = ET.Element('property', {'name': name, 'value': value})
-            root.insert(insert_idx, el)
-            modified = True
-    return modified
-
-def _add_pathelements_to_classpath(root: ET.Element, classpath_id: str, locations: List[str]) -> bool:
-    """
-    Adds pathelements to a classpath with a specified ID.
-
-    Args:
-        root: The XML root element.
-        classpath_id: The id of the target <path> tag.
-        locations: A list of location attribute values for the pathelements to add.
-
-    Returns:
-        True if one or more pathelements were added, False otherwise.
-    """
-    modified = False
-    for path_tag in root.findall('path'):
-        if path_tag.get('id') == classpath_id:
-            if 'refid' in path_tag.attrib:
-                log.warning(f"Path '{classpath_id}' has a refid attribute, cannot add dependencies directly.")
-                return False
+            # Add newline and indentation before element
+            if insert_idx > 0:
+                prev = root[insert_idx - 1]
+                if prev.tail:
+                    tail = prev.tail
+                else:
+                    tail = "\n    "
+            else:
+                tail = "\n    "
             
-            existing_locations = {pe.attrib.get('location') for pe in path_tag.findall('pathelement')}
-            for loc in locations:
-                if loc not in existing_locations:
-                    ET.SubElement(path_tag, 'pathelement', {'location': loc})
+            el = ET.Element('property', {'name': name, 'value': value})
+            el.tail = tail
+            root.insert(insert_idx, el)
+            insert_idx += 1
+            modified = True
+            log.info(f"Added property: {name}={value}")
+    
+    return modified
+
+
+def _ensure_build_classpath(root: ET._Element, jackson_version: str) -> bool:
+    """
+    Ensures that all build.classpath definitions include Jackson libraries.
+    If multiple build.classpath definitions exist, adds Jackson to all of them.
+    
+    Args:
+        root: The XML root element.
+        jackson_version: The Jackson version to use.
+    
+    Returns:
+        True if classpath was modified, False otherwise.
+    """
+    modified = False
+    
+    # Find ALL build.classpath definitions (including nested ones)
+    all_classpaths = []
+    for path in root.findall('.//path'):
+        if path.get('id') == 'build.classpath':
+            all_classpaths.append(path)
+    
+    if len(all_classpaths) > 1:
+        log.info(f"Found {len(all_classpaths)} build.classpath definitions, adding Jackson to all")
+    
+    # Add Jackson to all existing classpaths
+    if all_classpaths:
+        for existing_path in all_classpaths:
+            # Skip if it's just a reference (has refid)
+            if 'refid' in existing_path.attrib:
+                log.info("Skipping build.classpath with refid")
+                continue
+            
+            # Add missing Jackson jars to this classpath
+            existing_locations = {pe.get('location') for pe in existing_path.findall('pathelement')}
+            jackson_jars = [
+                '${jackson.core.jar}',
+                '${jackson.databind.jar}',
+                '${jackson.annotations.jar}'
+            ]
+            
+            for jar in jackson_jars:
+                if jar not in existing_locations:
+                    el = ET.SubElement(existing_path, 'pathelement', {'location': jar})
+                    el.tail = "\n        "
                     modified = True
-            break # Found the correct path ID, so exit loop
-    return modified
-
-def _update_javac_tasks(root: ET.Element) -> bool:
-    """
-    Adds `encoding='UTF-8'` and `nowarn='true'` attributes to all javac tasks.
-
-    Args:
-        root: The XML root element.
-
-    Returns:
-        True if one or more javac tasks were modified, False otherwise.
-    """
-    modified = False
-    for javac in root.findall('.//javac'):
-        if 'encoding' not in javac.attrib:
-            javac.set('encoding', 'UTF-8')
-            modified = True
-        if 'nowarn' not in javac.attrib:
-            javac.set('nowarn', 'true')
-            modified = True
-    return modified
-
-def _fix_compile_target_javac(root: ET.Element) -> bool:
-    """
-    Fixes javac tasks in compile targets to use compile.classpath and include instrumentation sources.
-    
-    This function:
-    1. Finds compile-related targets (name contains "compile" but not "test")
-    2. Updates javac classpath refid from "build.classpath" to "compile.classpath"
-    3. Adds <include name="org/instrument/**" /> if not present
-    
-    Args:
-        root: The XML root element.
+                    log.info(f"Added {jar} to build.classpath")
+    else:
+        # No build.classpath exists, create new one
+        # Find insertion point - after properties, before targets
+        insert_idx = len(root)
+        for i, child in enumerate(root):
+            if child.tag == 'target':
+                insert_idx = i
+                break
         
+        # Add comment
+        comment = ET.Comment(' Override build.classpath to include Jackson libraries ')
+        comment.tail = "\n    "
+        root.insert(insert_idx, comment)
+        insert_idx += 1
+        
+        # Create path element
+        path = ET.Element('path', {'id': 'build.classpath'})
+        path.text = "\n        "
+        path.tail = "\n    \n"
+        
+        # Add servlet.jar
+        el = ET.SubElement(path, 'pathelement', {'location': '${servlet.jar}'})
+        el.tail = "\n        "
+        
+        # Add Jackson jars
+        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.core.jar}'})
+        el.tail = "\n        "
+        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.databind.jar}'})
+        el.tail = "\n        "
+        el = ET.SubElement(path, 'pathelement', {'location': '${jackson.annotations.jar}'})
+        el.tail = "\n    "
+        
+        root.insert(insert_idx, path)
+        modified = True
+        log.info("Created build.classpath with Jackson libraries")
+    
+    return modified
+
+
+def _add_instrument_include_to_javac(root: ET._Element) -> bool:
+    """
+    Adds <include name="org/instrument/**"/> to all javac tasks in compile targets
+    and adds nowarn="true" attribute.
+    
+    Args:
+        root: The XML root element.
+    
     Returns:
-        True if one or more javac tasks were modified, False otherwise.
+        True if any javac was modified, False otherwise.
     """
     modified = False
     
-    # Find all targets that are compile-related (contain "compile" but not "test")
+    # Find all targets with "compile" in name (but not "test")
     for target in root.findall('target'):
         target_name = target.get('name', '')
         if 'compile' in target_name.lower() and 'test' not in target_name.lower():
-            # Find javac tasks within this compile target
-            for javac in target.findall('javac'):
-                # Check if javac has a classpath element
-                classpath = javac.find('classpath')
-                if classpath is not None:
-                    # Check if it references build.classpath
-                    refid = classpath.get('refid')
-                    if refid == 'build.classpath':
-                        # Change to compile.classpath
-                        classpath.set('refid', 'compile.classpath')
-                        modified = True
-                        log.info(f"Updated classpath refid from build.classpath to compile.classpath in target '{target_name}'")
+            # Find javac elements in this target
+            for javac in target.findall('.//javac'):
+                # Add nowarn="true" if not present
+                if 'nowarn' not in javac.attrib:
+                    javac.set('nowarn', 'true')
+                    modified = True
+                    log.info(f"Added nowarn='true' to javac in target '{target_name}'")
                 
                 # Check if org/instrument/** is already included
                 existing_includes = [inc.get('name', '') for inc in javac.findall('include')]
                 if 'org/instrument/**' not in existing_includes:
-                    # Add the instrumentation include
-                    include_elem = ET.SubElement(javac, 'include')
-                    include_elem.set('name', 'org/instrument/**')
+                    # Find last include element to insert after it
+                    includes = javac.findall('include')
+                    if includes:
+                        last_include = includes[-1]
+                        # Get the indentation from last include
+                        if last_include.tail:
+                            indent = '\n' + ' ' * 12  # Default indentation
+                        else:
+                            indent = '\n' + ' ' * 12
+                        
+                        # Create new include element
+                        new_include = ET.Element('include', {'name': 'org/instrument/**'})
+                        new_include.tail = last_include.tail
+                        
+                        # Insert after last include
+                        parent = javac
+                        idx = list(parent).index(last_include)
+                        parent.insert(idx + 1, new_include)
+                        
+                        modified = True
+                        log.info(f"Added org/instrument/** include to javac in target '{target_name}'")
+    
+    # Also add nowarn to compile.tests target
+    for target in root.findall('target'):
+        target_name = target.get('name', '')
+        if target_name == 'compile.tests':
+            for javac in target.findall('.//javac'):
+                if 'nowarn' not in javac.attrib:
+                    javac.set('nowarn', 'true')
                     modified = True
-                    log.info(f"Added org/instrument/** include to javac in target '{target_name}'")
+                    log.info(f"Added nowarn='true' to javac in target '{target_name}'")
     
     return modified
+
 
 # --- Main Functions ---
 
@@ -180,26 +265,18 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
     Returns:
         True if the file was successfully modified.
     """
-    def modifier(root: ET.Element) -> bool:
+    def modifier(root: ET._Element) -> bool:
         properties = {
             'jackson.version': jackson_version,
-            'jackson.core.jar': f"lib/jackson-core-{jackson_version}.jar",
-            'jackson.databind.jar': f"lib/jackson-databind-{jackson_version}.jar",
-            'jackson.annotations.jar': f"lib/jackson-annotations-{jackson_version}.jar",
+            'jackson.core.jar': f"${{d4j.workdir}}/lib/jackson-core-{jackson_version}.jar",
+            'jackson.databind.jar': f"${{d4j.workdir}}/lib/jackson-databind-{jackson_version}.jar",
+            'jackson.annotations.jar': f"${{d4j.workdir}}/lib/jackson-annotations-{jackson_version}.jar",
             'instrument.src.dir': f'{class_dir}/org/instrument'
         }
         
-        classpath_locations = [
-            f"lib/jackson-core-{jackson_version}.jar",
-            f"lib/jackson-databind-{jackson_version}.jar",
-            f"lib/jackson-annotations-{jackson_version}.jar",
-            f'{class_dir}/org/instrument'
-        ]
-
-        # Call each modification function and combine results with OR
         modified1 = _ensure_properties(root, properties)
-        modified2 = _add_pathelements_to_classpath(root, 'compile.classpath', classpath_locations)
-        modified3 = _update_javac_tasks(root)
+        modified2 = _ensure_build_classpath(root, jackson_version)
+        modified3 = _add_instrument_include_to_javac(root)
         
         return modified1 or modified2 or modified3
 
@@ -218,7 +295,8 @@ def add_jackson_to_project_template(build_file_path: str, jackson_version: str =
     Returns:
         True if the file was successfully modified.
     """
-    def modifier(root: ET.Element) -> bool:
+    def modifier(root: ET._Element) -> bool:
+        # Add Jackson properties with proper comment
         properties = {
             'jackson.version': jackson_version,
             'jackson.core.jar': f"${{d4j.workdir}}/lib/jackson-core-{jackson_version}.jar",
@@ -226,21 +304,40 @@ def add_jackson_to_project_template(build_file_path: str, jackson_version: str =
             'jackson.annotations.jar': f"${{d4j.workdir}}/lib/jackson-annotations-{jackson_version}.jar"
         }
         
-        classpath_locations = [
-            "${jackson.core.jar}",
-            "${jackson.databind.jar}",
-            "${jackson.annotations.jar}"
-        ]
-
+        # Find where to insert properties (after test.classes.dir or compile.classpath)
+        insert_idx = 0
+        for i, child in enumerate(root):
+            if child.tag == 'property':
+                prop_name = child.get('name', '')
+                if 'test.classes.dir' in prop_name:
+                    insert_idx = i + 1
+            elif child.tag == 'path':
+                path_id = child.get('id', '')
+                if path_id == 'compile.classpath':
+                    insert_idx = i + 1
+        
+        # Add comment before Jackson properties
+        modified = False
+        existing_props = {prop.get('name') for prop in root.findall('property')}
+        
+        if 'jackson.version' not in existing_props:
+            # Add blank line and comment
+            if insert_idx > 0:
+                prev = root[insert_idx - 1]
+                if prev.tail and not prev.tail.endswith('\n\n'):
+                    prev.tail = (prev.tail or '') + '\n    '
+            
+            comment = ET.Comment(' Jackson dependencies for instrumentation ')
+            comment.tail = "\n    "
+            root.insert(insert_idx, comment)
+            insert_idx += 1
+            modified = True
+        
         modified1 = _ensure_properties(root, properties)
-        # Attempt to add to both compile.classpath and build.classpath
-        modified2 = _add_pathelements_to_classpath(root, 'compile.classpath', classpath_locations)
-        modified3 = _add_pathelements_to_classpath(root, 'build.classpath', classpath_locations)
+        modified2 = _ensure_build_classpath(root, jackson_version)
+        modified3 = _add_instrument_include_to_javac(root)
         
-        # NEW: Fix javac tasks in compile targets to use compile.classpath and include instrumentation sources
-        modified4 = _fix_compile_target_javac(root)
-        
-        return modified1 or modified2 or modified3 or modified4
+        return modified or modified1 or modified2 or modified3
 
     return _process_build_file(build_file_path, modifier)
 
@@ -273,12 +370,13 @@ def verify_jackson_in_defects4j_shared_build(jackson_version: str = "2.13.0") ->
         return
 
     try:
-        tree = ET.parse(shared_build_file)
+        parser = ET.XMLParser(remove_blank_text=False, remove_comments=False)
+        tree = ET.parse(shared_build_file, parser)
         root = tree.getroot()
 
         # Check for existence of Jackson properties
         expected_props = {'jackson.version', 'jackson.core.jar', 'jackson.databind.jar', 'jackson.annotations.jar'}
-        existing_props = {prop.attrib.get('name') for prop in root.findall('property')}
+        existing_props = {prop.get('name') for prop in root.findall('property')}
         
         if not expected_props.issubset(existing_props):
             log.warning(f"Jackson properties are not fully configured in {shared_build_file}. Manual verification may be needed.")
