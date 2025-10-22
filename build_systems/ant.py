@@ -220,6 +220,77 @@ def _add_instrument_include_to_javac(root: ET._Element) -> bool:
     return modified
 
 
+def _add_jackson_to_path_filesets(root: ET._Element) -> bool:
+    """
+    Adds Jackson jar includes to fileset elements within path definitions.
+    Creates a new fileset with Jackson jars from d4j.workdir/lib if not already present.
+    
+    Args:
+        root: The XML root element.
+    
+    Returns:
+        True if any path was modified, False otherwise.
+    """
+    modified = False
+    
+    # Jackson jars to add
+    jackson_jars = [
+        'jackson-core-*.jar',
+        'jackson-databind-*.jar', 
+        'jackson-annotations-*.jar'
+    ]
+    
+    # Find all path elements
+    for path_elem in root.findall('.//path'):
+        path_id = path_elem.get('id', '')
+        
+        # Skip if it's just a reference (has refid)
+        if 'refid' in path_elem.attrib:
+            continue
+        
+        # Check if Jackson jars are already included in any fileset
+        has_jackson = False
+        for fileset in path_elem.findall('fileset'):
+            fileset_dir = fileset.get('dir', '')
+            if '${d4j.workdir}/lib' in fileset_dir or '${d4j.home}/lib' in fileset_dir:
+                # Check if Jackson includes exist
+                includes = [inc.get('name', '') for inc in fileset.findall('include')]
+                if any('jackson' in inc for inc in includes):
+                    has_jackson = True
+                    break
+        
+        if not has_jackson:
+            # Add new fileset with Jackson jars
+            # Find last fileset to insert after it
+            filesets = path_elem.findall('fileset')
+            
+            # Create new fileset element
+            new_fileset = ET.Element('fileset', {'dir': '${d4j.workdir}/lib'})
+            
+            # Add Jackson jar includes
+            for jar in jackson_jars:
+                include_elem = ET.Element('include', {'name': jar})
+                include_elem.tail = '\n      '
+                new_fileset.append(include_elem)
+            
+            # Set proper indentation
+            new_fileset.text = '\n      '
+            new_fileset.tail = '\n  '
+            
+            # Insert after last fileset or at the end
+            if filesets:
+                last_fileset = filesets[-1]
+                idx = list(path_elem).index(last_fileset)
+                path_elem.insert(idx + 1, new_fileset)
+            else:
+                path_elem.append(new_fileset)
+            
+            modified = True
+            log.info(f"Added Jackson fileset to path '{path_id}'")
+    
+    return modified
+
+
 # --- Main Functions ---
 
 def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.0", class_dir: str = "src/main/java") -> bool:
@@ -246,8 +317,9 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
         modified3 = _add_instrument_include_to_javac(root)
+        modified4 = _add_jackson_to_path_filesets(root)
         
-        return modified1 or modified2 or modified3
+        return modified1 or modified2 or modified3 or modified4
 
     return _process_build_file(build_xml_path, modifier)
 
@@ -305,8 +377,9 @@ def add_jackson_to_project_template(build_file_path: str, jackson_version: str =
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
         modified3 = _add_instrument_include_to_javac(root)
+        modified4 = _add_jackson_to_path_filesets(root)
         
-        return modified or modified1 or modified2 or modified3
+        return modified or modified1 or modified2 or modified3 or modified4
 
     return _process_build_file(build_file_path, modifier)
 
