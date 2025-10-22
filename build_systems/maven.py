@@ -38,11 +38,14 @@ def setup_jackson_dependencies(workdir: str, jackson_version: str = "2.13.0") ->
     add_jackson_to_pom(str(pom_path), jackson_version)
     
     # Step 2: Add Jackson to maven-build.xml if it exists (Defects4J projects)
-    maven_build_xml = workdir_path / "maven-build.xml"
-    if maven_build_xml.is_file():
-        log.info(f"Adding Jackson to {maven_build_xml}")
-        add_jackson_to_maven_build_xml(str(maven_build_xml), jackson_version)
-    
+    # If workdir contains "jackson", then we'll skip it
+    if "jackson" not in workdir.lower():
+        log.info(f"Adding Jackson to maven-build.xml")
+        maven_build_xml = workdir_path / "maven-build.xml"
+        if maven_build_xml.is_file():
+            log.info(f"Adding Jackson to {maven_build_xml}")
+            add_jackson_to_maven_build_xml(str(maven_build_xml), jackson_version)
+        
     # Step 3: Download Jackson JARs using Maven
     log.info(f"Downloading Jackson JARs to {workdir}/lib")
     download_jackson_jars_with_maven(workdir)

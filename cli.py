@@ -113,7 +113,7 @@ def main() -> None:
     p_all.add_argument("--report-file", dest="report_file")
 
     p_matrix = sub.add_parser("matrix", help="Run across activated bugs and summarize results")
-    p_matrix.add_argument("--projects", default="Chart,Closure,Lang,Math,Mockito,Time")
+    p_matrix.add_argument("--projects", default=",".join(PROJECTS))
     p_matrix.add_argument("--max-bugs-per-project", type=int, default=0, help="0 means no cap")
     p_matrix.add_argument("--workers", type=int, default=4)
     p_matrix.add_argument("--jackson-version", dest="jackson_version", default="2.13.0")

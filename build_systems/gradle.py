@@ -207,7 +207,12 @@ def update_bnd_files(work_dir: str) -> None:
             continue
 
         original_text = text
-        package_contents = ["org.instrument.*,\\", "com.fasterxml.jackson.annotation,\\", "com.fasterxml.jackson.core,\\", "com.fasterxml.jackson.databind,\\", "com.fasterxml.jackson.databind.introspect,\\", "com.fasterxml.jackson.databind.module"]
+        package_contents = ["org.instrument.*,\\",
+        "com.fasterxml.jackson.annotation,\\",
+        "com.fasterxml.jackson.core,\\",
+        "com.fasterxml.jackson.databind,\\",
+        "com.fasterxml.jackson.databind.introspect,\\",
+        "com.fasterxml.jackson.databind.module,\\"]
         for content in package_contents:
             text = _ensure_bnd_key(text, key="Import-Package", value=content)
         text = _ensure_bnd_key(text, key="Private-Package", value="org.instrument.*")

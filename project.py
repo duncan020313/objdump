@@ -12,7 +12,7 @@ import defects4j
 from build_systems import detect
 from build_systems.gradle import setup_jackson_dependencies as setup_gradle_jackson
 from build_systems.maven import setup_jackson_dependencies as setup_maven_jackson
-from build_systems.ant import process_all_ant_files_in_dir as add_ant
+from build_systems.ant import process_all_ant_files_in_dir as add_ant, add_jackson_to_build_file
 from instrumentation.diff import compute_file_diff_ranges_both
 from instrumentation.ts import extract_changed_methods
 from instrumentation.instrumenter import instrument_changed_methods, copy_java_template_to_classdir
@@ -113,15 +113,19 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
     
     build_system = detect(work_dir)
     classes_dir = defects4j.get_source_classes_dir(work_dir)
+    download_jackson_jars(work_dir, jackson_version)
     if build_system == BuildSystem.MAVEN:
         log.info("Detected Maven build system")
         setup_maven_jackson(work_dir, jackson_version)
+        if "jackson" not in work_dir.lower():
+            add_ant(work_dir, jackson_version, classes_dir)
+        else:
+            add_jackson_to_build_file(os.path.join(work_dir, "build.xml"), jackson_version, classes_dir)
     elif build_system == BuildSystem.GRADLE:
         log.info("Detected Gradle build system")
         setup_gradle_jackson(work_dir, jackson_version)
     elif build_system == BuildSystem.ANT:
         log.info("Detected Ant build system")
-        download_jackson_jars(work_dir, jackson_version)
         add_ant(work_dir, jackson_version, classes_dir)
     copy_java_template_to_classdir(work_dir, classes_dir)
 

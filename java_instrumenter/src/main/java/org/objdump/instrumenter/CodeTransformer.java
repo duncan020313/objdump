@@ -12,11 +12,11 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.*;
-import com.github.javaparser.ast.type.Type;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -161,7 +161,7 @@ public class CodeTransformer {
         }
         
         // Write instrumented code back to file
-        try (FileWriter writer = new FileWriter(javaFilePath)) {
+        try (FileWriter writer = new FileWriter(javaFilePath, StandardCharsets.UTF_8)) {
             writer.write(cu.toString());
         }
         

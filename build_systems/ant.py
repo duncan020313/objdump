@@ -324,66 +324,6 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
     return _process_build_file(build_xml_path, modifier)
 
 
-def add_jackson_to_project_template(build_file_path: str, jackson_version: str = "2.13.0") -> bool:
-    """
-    Adds Jackson dependencies to a Defects4J project template build file.
-    (e.g., /path/to/d4j/project/Chart.build.xml)
-
-    Args:
-        build_file_path: Path to the project template build file.
-        jackson_version: The Jackson version to use.
-
-    Returns:
-        True if the file was successfully modified.
-    """
-    def modifier(root: ET._Element) -> bool:
-        # Add Jackson properties with proper comment
-        properties = {
-            'jackson.version': jackson_version,
-            'jackson.core.jar': f"${{d4j.workdir}}/lib/jackson-core-{jackson_version}.jar",
-            'jackson.databind.jar': f"${{d4j.workdir}}/lib/jackson-databind-{jackson_version}.jar",
-            'jackson.annotations.jar': f"${{d4j.workdir}}/lib/jackson-annotations-{jackson_version}.jar"
-        }
-        
-        # Find where to insert properties (after test.classes.dir or compile.classpath)
-        insert_idx = 0
-        for i, child in enumerate(root):
-            if child.tag == 'property':
-                prop_name = child.get('name', '')
-                if 'test.classes.dir' in prop_name:
-                    insert_idx = i + 1
-            elif child.tag == 'path':
-                path_id = child.get('id', '')
-                if path_id == 'compile.classpath':
-                    insert_idx = i + 1
-        
-        # Add comment before Jackson properties
-        modified = False
-        existing_props = {prop.get('name') for prop in root.findall('property')}
-        
-        if 'jackson.version' not in existing_props:
-            # Add blank line and comment
-            if insert_idx > 0:
-                prev = root[insert_idx - 1]
-                if prev.tail and not prev.tail.endswith('\n\n'):
-                    prev.tail = (prev.tail or '') + '\n    '
-            
-            comment = ET.Comment(' Jackson dependencies for instrumentation ')
-            comment.tail = "\n    "
-            root.insert(insert_idx, comment)
-            insert_idx += 1
-            modified = True
-        
-        modified1 = _ensure_properties(root, properties)
-        modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
-        modified3 = _add_instrument_include_to_javac(root)
-        modified4 = _add_jackson_to_path_filesets(root)
-        
-        return modified or modified1 or modified2 or modified3 or modified4
-
-    return _process_build_file(build_file_path, modifier)
-
-
 def process_all_ant_files_in_dir(work_dir: str, jackson_version: str = "2.13.0", class_dir: str = "src/main/java") -> None:
     """
     Finds and adds Jackson dependencies to all Ant build files within a working directory.
