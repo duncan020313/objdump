@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Tuple, Any, Union
 from objdump_io.shell import run
 import logging
-
+import os
 
 def checkout(project_id: str, bug_id: str, work_dir: str, version_suffix: str) -> bool:
     res = run(["defects4j", "checkout", "-p", project_id, "-v", f"{bug_id}{version_suffix}", "-w", work_dir])
@@ -87,7 +87,6 @@ def get_source_classes_dir(work_dir: str) -> str:
         return classes_dir
     
     # Fallback: check for common directory structures
-    import os
     common_paths = [
         "src/main/java",
         "src/java", 
@@ -125,13 +124,12 @@ def get_test_classes_dir(work_dir: str) -> str:
     if tests_dir:
         return tests_dir
     
-    # Fallback: check for common directory structures
-    import os
     common_paths = [
         "src/test/java",
         "test/java",
         "test",
-        "tests"
+        "tests",
+        "src/test",
     ]
     
     for path in common_paths:
@@ -157,7 +155,6 @@ def resolve_test_class_path(work_dir: str, test_class_name: str) -> Optional[str
     Returns:
         Absolute path to the .java file if it exists, None otherwise
     """
-    import os
     
     # Get test classes directory
     tests_dir = get_test_classes_dir(work_dir)

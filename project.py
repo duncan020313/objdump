@@ -264,6 +264,9 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     relevant_tests = defects4j.export(work_dir, "tests.relevant")
     trigger_tests = defects4j.export(work_dir, "tests.trigger")
     
+    assert relevant_tests is not None
+    assert trigger_tests is not None
+    
     # Get modified classes for filtering
     modified_classes_raw = defects4j.export(work_dir, "classes.modified")
     modified_classes = [s.strip() for s in modified_classes_raw.splitlines() if s.strip()] if modified_classes_raw else []
@@ -363,14 +366,14 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
         # Resolve test class to file path
         test_file_path = defects4j.resolve_test_class_path(work_dir, test_name)
         if not test_file_path:
-            log.warning(f"Could not resolve test class file for: {test_name}")
+            log.error(f"Could not resolve test class file for: {test_name}")
             # Fall back to running the entire class
             return [test_name]
         
         # Extract test methods from the class file
         test_methods = extract_test_methods(test_file_path)
         if not test_methods:
-            log.warning(f"Could not extract test methods from: {test_file_path}")
+            log.error(f"Could not extract test methods from: {test_file_path}")
             # Fall back to running the entire class
             return [test_name]
         
