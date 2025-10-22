@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Optional
+import re
 
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
         _ensure_gradle_dependencies_kts(str(gradle_kts), jackson_version)
     else:
         log.warning("No Gradle build file found (build.gradle/build.gradle.kts); skipping")
+
+    # Also update any .bnd files in the project to include org.instrument.*
+    update_bnd_files(work_dir)
 
 
 def _ensure_gradle_dependencies_groovy(build_file_path: str, jackson_version: str) -> None:
@@ -185,3 +189,123 @@ def _inject_into_first_block(text: str, block_name: str, injected_lines: str) ->
         i += 1
 
     return None
+
+
+def update_bnd_files(work_dir: str) -> None:
+    """
+    Recursively find *.bnd files and ensure both Import-Package and Private-Package
+    include 'org.instrument.*' exactly once, preserving formatting where possible.
+    """
+    project_dir = Path(work_dir)
+    if not project_dir.exists():
+        return
+
+    for bnd_path in project_dir.rglob("*.bnd"):
+        try:
+            text = bnd_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        original_text = text
+        package_contents = ["org.instrument.*,\\", "com.fasterxml.jackson.annotation,\\", "com.fasterxml.jackson.core,\\", "com.fasterxml.jackson.databind,\\", "com.fasterxml.jackson.databind.introspect,\\", "com.fasterxml.jackson.databind.module"]
+        for content in package_contents:
+            text = _ensure_bnd_key(text, key="Import-Package", value=content)
+        text = _ensure_bnd_key(text, key="Private-Package", value="org.instrument.*")
+
+        if text != original_text:
+            try:
+                bnd_path.write_text(text, encoding="utf-8")
+                log.info("Updated BND file: %s", bnd_path)
+            except Exception:
+                # Skip files we cannot write
+                pass
+
+
+def _ensure_bnd_key(text: str, key: str, value: str) -> str:
+    """
+    Ensure a BND property `key` contains `value`.
+
+    - Preserves existing formatting (delimiter, indentation, continuations) when possible
+    - Avoids inserting duplicates
+    - Creates the property if missing using `default_delim`
+    """
+    header_re = re.compile(rf"(?m)^(?P<key>{re.escape(key)})\s*(?P<delim>[:=])\s*(?P<rest>.*)$")
+    m = header_re.search(text)
+    if not m:
+        log.error("Could not find property %s in %s", key, text)
+        return text
+
+    start = m.start()
+    end = m.end()
+
+    # Determine the block (header + any continuation lines) boundaries
+    # The block ends before the next blank line or next header-like line
+    lines = text[end:].splitlines(keepends=True)
+    block_extra_len = 0
+    for _, line in enumerate(lines):
+        # Stop if we hit a blank line
+        if line.strip() == "":
+            break
+        # Stop if we hit a new property header (e.g., Something: or Something=)
+        if re.match(r"^[A-Za-z0-9_.-]+\s*[:=]", line):
+            break
+        block_extra_len += len(line)
+
+    block_start = start
+    block_end = end + block_extra_len
+    block_text = text[block_start:block_end]
+
+    # If value already within this block, return original text
+    if value in block_text:
+        return text
+
+    # Split the block into header and continuation lines
+    header_line_end = block_text.find("\n")
+    if header_line_end == -1:
+        header_line = block_text
+        cont = ""
+    else:
+        header_line = block_text[:header_line_end]
+        cont = block_text[header_line_end + 1 :]
+
+    # Decide how to insert depending on whether we have continuation lines
+    if not cont:
+        # Single-line property: append inline with a comma
+        # Keep spacing after delimiter as-is
+        if header_line.rstrip().endswith("\\"):
+            # Already using continuation, add a new line with a reasonable indent
+            indent = " " * 16
+            new_block = header_line + "\n" + indent + value
+        else:
+            # Append inline
+            new_block = header_line.rstrip() + ", " + value
+    else:
+        # Multi-line continuation block
+        cont_lines = cont.splitlines()
+        # Determine indentation from first continuation line
+        m_indent = re.match(r"^\s*", cont_lines[0]) if cont_lines else None
+        indent = m_indent.group(0) if m_indent else " " * 4
+
+        # Ensure the last non-empty continuation line ends with a comma and continuation if pattern uses \
+        last_idx = len(cont_lines) - 1
+        while last_idx >= 0 and cont_lines[last_idx].strip() == "":
+            last_idx -= 1
+        if last_idx >= 0:
+            last_line = cont_lines[last_idx].rstrip("\r\n")
+            # If it ends with a backslash, ensure comma before it; else append comma
+            if last_line.rstrip().endswith("\\"):
+                # Insert comma before trailing backslash if missing
+                core = last_line.rstrip()
+                if not re.search(r",\s*\\$", core):
+                    core = re.sub(r"\\+$", lambda _m: ", \\", core)
+                cont_lines[last_idx] = core
+            else:
+                cont_lines[last_idx] = last_line + ", \\\\"  # add continuation
+
+        # Append the new value line
+        cont_lines.append(f"{indent}{value}")
+        cont = "\n".join(cont_lines)
+        new_block = header_line + "\n" + cont
+
+    # Rebuild the text
+    return text[:block_start] + new_block + text[block_end:]

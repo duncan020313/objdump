@@ -129,7 +129,7 @@ def main() -> None:
     p_postprocess.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
     p_classify = sub.add_parser("classify", help="Classify bugs by root cause type")
-    p_classify.add_argument("--projects", default="Chart,Closure,Lang,Math,Mockito,Time", help="Comma-separated list of projects (default: all)")
+    p_classify.add_argument("--projects", default=",".join(PROJECTS), help="Comma-separated list of projects")
     p_classify.add_argument("--max-bugs-per-project", type=int, default=0, help="Maximum bugs per project (0 = no limit)")
     p_classify.add_argument("--workers", type=int, default=4, help="Number of parallel workers")
     p_classify.add_argument("--output", help="Output CSV file path (default: stdout)")
