@@ -40,60 +40,60 @@ PROJECTS = [
 
 def build_java_instrumenter() -> bool:
     """Build the Java instrumenter using Maven.
-    
+
     Returns:
         True if build succeeded, False otherwise
     """
     log = logging.getLogger("build_java_instrumenter")
     instrumenter_dir = os.path.join(os.path.dirname(__file__), "java_instrumenter")
-    
+
     log.info("Building Java instrumenter...")
     result = subprocess.run(
         ["mvn", "clean", "package", "-q"],
         cwd=instrumenter_dir,
         capture_output=False,
     )
-    
+
     if result.returncode != 0:
         log.error("Java instrumenter build failed")
         sys.exit(1)
-    
+
     log.info("Java instrumenter built successfully")
     return True
 
 
 def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int]]:
     """Load valid bug IDs from CSV file.
-    
+
     Returns:
         Dictionary mapping project names to sets of valid bug IDs
     """
     log = logging.getLogger("load_valid_bugs")
     valid_bugs = {}
-    
+
     if not os.path.exists(csv_path):
         log.warning(f"Warning: {csv_path} not found. Will use all available bugs.")
         return {}
-    
+
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 project = row['project']
                 bug_id = int(row['bug_id'])
-                
+
                 if project not in valid_bugs:
                     valid_bugs[project] = set()
                 valid_bugs[project].add(bug_id)
-        
+
         log.info(f"Loaded valid bugs from {csv_path}:")
         for project, bugs in valid_bugs.items():
             log.info(f"  {project}: {len(bugs)} bugs")
-            
+
     except Exception as e:
         log.error(f"Error loading {csv_path}: {e}")
         return {}
-    
+
     return valid_bugs
 
 
@@ -143,14 +143,14 @@ def main() -> None:
     p_merge.add_argument("--output", "-o", required=True, help="Output JSON file path")
 
     args = parser.parse_args()
-    
+
     configure_logging(debug=args.debug)
     log = logging.getLogger("cli")
 
     if not build_java_instrumenter():
         log.error("Failed to build Java instrumenter. Exiting.")
         sys.exit(1)
-        
+
 
     if args.cmd == "all":
         run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.report_file)
@@ -158,22 +158,22 @@ def main() -> None:
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         if not projects:
             projects = PROJECTS
-            
+
         os.makedirs(args.reports_dir, exist_ok=True)
-        
+
         # Load valid bugs from CSV
         valid_bugs = load_valid_bugs(args.valid_bugs_csv)
-        
+
         # Set environment variable for centralized dumps directory
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
         log.info(f"Dump files will be collected to: {args.dumps_dir}")
 
         results: List[Dict[str, Any]] = []
-        
+
         # Calculate total number of bugs to process
         total_bugs = 0
         bug_tasks = []  # List of (project, bug_id) tuples
-        
+
         for proj in projects:
             # Use valid bugs if available, otherwise fall back to all bugs
             if proj in valid_bugs:
@@ -182,11 +182,11 @@ def main() -> None:
             else:
                 ids = defects4j.list_bug_ids(proj)
                 log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
-            
+
             if args.max_bugs_per_project > 0:
                 ids = ids[: args.max_bugs_per_project]
                 log.info(f"Limited to {len(ids)} bugs for {proj} (max: {args.max_bugs_per_project})")
-            
+
             for bug_id in ids:
                 bug_tasks.append((proj, bug_id))
                 total_bugs += 1
@@ -211,7 +211,7 @@ def main() -> None:
             futures = []
             for proj, bug_id in bug_tasks:
                 futures.append(ex.submit(job, proj, bug_id))
-            
+
             for fut in as_completed(futures):
                 try:
                     res = fut.result()
@@ -219,13 +219,13 @@ def main() -> None:
                     res = {"project": "?", "bug_id": "?", "stages": {}, "error": str(e)}
                 results.append(res)
                 progress_bar.update(1)
-                
+
                 # Update progress bar description with current status
                 completed = len(results)
                 progress_bar.set_description(f"Processing bugs ({completed}/{total_bugs})")
-        
+
         progress_bar.close()
-        
+
         # Log completion summary
         successful = len([r for r in results if r["error"] is None])
         failed = len([r for r in results if r["error"] is not None])
@@ -236,23 +236,23 @@ def main() -> None:
         md_path = os.path.join(args.reports_dir, f"{base}.md")
         summary_path = os.path.join(args.reports_dir, f"{base}_summary.md")
         errors_path = os.path.join(args.reports_dir, f"{base}_errors.md")
-        
+
         write_json(json_path, results)
         write_markdown_table(md_path, results, args.dumps_dir)
-        
+
         # Write additional reports
         write_summary_statistics(summary_path, results, args.dumps_dir)
         write_detailed_errors(errors_path, results, args.dumps_dir)
-    
+
     elif args.cmd == "postprocess":
-        
+
         if not os.path.exists(args.dump_dir):
             log.error(f"Error: Directory {args.dump_dir} does not exist")
             return
-        
+
         log.info(f"Post-processing dump files in {args.dump_dir}")
         stats = post_process_dump_files(args.dump_dir, backup=not args.no_backup)
-        
+
         if args.verbose:
             log.info(f"Processing complete:")
             log.info(f"  JSON files processed: {stats['jsonl_files_processed']}")
@@ -263,37 +263,37 @@ def main() -> None:
             log.info(f"Processed {stats['jsonl_files_processed']} JSON files, {stats['json_files_processed']} JSON files")
             if stats['errors'] > 0:
                 log.warning(f"Warning: {stats['errors']} errors occurred during processing")
-    
+
     elif args.cmd == "classify":
         # Handle single bug classification (backward compatibility)
         if args.project and args.bug:
             bug_info = defects4j.classify_bug(args.project, args.bug)
-            
+
             if not bug_info:
                 log.error(f"Error: Failed to retrieve bug information for {args.project}-{args.bug}")
                 return
         else:
             log.info(f"Classifying bugs for projects: {', '.join(PROJECTS)}")
             log.info(f"Using {args.workers} parallel workers")
-            
+
             # Use the classification module
             all_results = classification.classify_projects(PROJECTS, args.max_bugs_per_project, args.workers)
-            
+
         if args.filter_functional:
             all_results = classification.filter_functional_bugs(all_results)
             log.info(f"Filtered to {len(all_results)} functional bugs")
-            
+
         # Write outputs
         if args.output:
             classification.write_classification_csv(args.output, all_results)
             log.info(f"CSV results saved to {args.output}")
-        
+
         if args.output_md:
             classification.write_classification_markdown(args.output_md, all_results)
             log.info(f"Markdown results saved to {args.output_md}")
-        
+
         log.info(f"Total bugs classified: {len(all_results)}")
-    
+
     elif args.cmd == "merge":
         try:
             stats = merger.merge_json_files(args.target_dir, args.output)
@@ -305,7 +305,7 @@ def main() -> None:
             log.error(f"Merge failed: {e}")
             sys.exit(1)
 
-        
+
 if __name__ == "__main__":
     main()
 

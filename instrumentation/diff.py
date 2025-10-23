@@ -12,9 +12,9 @@ def parse_unified_diff_hunks_both(diff_text: str) -> Dict[str, List[Tuple[int, i
     log.debug(f"Parsing unified diff: {diff_text}")
     left_hunks: List[Tuple[int, int]] = []
     right_hunks: List[Tuple[int, int]] = []
-    
+
     lines = diff_text.splitlines()
-    
+
     for i, line in enumerate(lines):
         # Look for hunk header
         if line.startswith("@@ ") and "@@" in line:
@@ -23,36 +23,36 @@ def parse_unified_diff_hunks_both(diff_text: str) -> Dict[str, List[Tuple[int, i
                 parts = header.split()
                 if len(parts) < 2:
                     continue
-                    
+
                 left, right = parts[0].lstrip("-"), parts[1].lstrip("+")
-                
+
                 # Parse starting line numbers
                 if "," in left:
                     lstart_s, _ = left.split(",", 1)
                     lstart = int(lstart_s)
                 else:
                     lstart = int(left)
-                    
+
                 if "," in right:
                     rstart_s, _ = right.split(",", 1)
                     rstart = int(rstart_s)
                 else:
                     rstart = int(right)
-                
+
                 # Track actual changed lines within this hunk
                 left_changed_lines = []
                 right_changed_lines = []
                 current_left_line = lstart
                 current_right_line = rstart
-                
+
                 # Process lines within this hunk
                 for j in range(i + 1, len(lines)):
                     hunk_line = lines[j]
-                    
+
                     # Check if we've reached the next hunk
                     if hunk_line.startswith("@@ "):
                         break
-                        
+
                     # Process diff line based on prefix
                     if hunk_line.startswith("-"):
                         # Deletion from left (buggy) file
@@ -72,19 +72,19 @@ def parse_unified_diff_hunks_both(diff_text: str) -> Dict[str, List[Tuple[int, i
                     else:
                         # Other lines (like diff headers) - skip
                         pass
-                
+
                 # Build ranges from changed lines
                 if left_changed_lines:
                     left_ranges = _build_ranges_from_lines(left_changed_lines)
                     left_hunks.extend(left_ranges)
-                    
+
                 if right_changed_lines:
                     right_ranges = _build_ranges_from_lines(right_changed_lines)
                     right_hunks.extend(right_ranges)
-                    
+
             except Exception:
                 continue
-    
+
     return {"left": left_hunks, "right": right_hunks}
 
 
@@ -92,12 +92,12 @@ def _build_ranges_from_lines(changed_lines: List[int]) -> List[Tuple[int, int]]:
     """Build contiguous ranges from a list of line numbers."""
     if not changed_lines:
         return []
-    
+
     changed_lines.sort()
     ranges = []
     start = changed_lines[0]
     end = start
-    
+
     for line in changed_lines[1:]:
         if line == end + 1:
             # Contiguous line
@@ -107,7 +107,7 @@ def _build_ranges_from_lines(changed_lines: List[int]) -> List[Tuple[int, int]]:
             ranges.append((start, end))
             start = line
             end = line
-    
+
     # Add the last range
     ranges.append((start, end))
     return ranges

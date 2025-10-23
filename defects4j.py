@@ -25,7 +25,7 @@ def compile(work_dir: str, env: Optional[Dict[str, str]] = None) -> Tuple[bool, 
 def test(work_dir: str, tests: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None, timeout: int = 60) -> Union[bool, str]:
     """
     Run defects4j tests and return result.
-    
+
     Returns:
         bool: True if all tests passed, False if any test failed
         str: "timeout" if any test timed out
@@ -71,13 +71,13 @@ def export(work_dir: str, prop: str) -> Optional[str]:
 def get_source_classes_dir(work_dir: str) -> str:
     """
     Robustly detect the source classes directory for Java files.
-    
+
     Uses defects4j export -p "dir.src.classes" to get the correct path,
     with fallback to common directory structures if export fails.
-    
+
     Args:
         work_dir: Working directory of the Defects4J project
-        
+
     Returns:
         Relative path to the source classes directory (e.g., "src/main/java" or "src/java")
     """
@@ -85,15 +85,15 @@ def get_source_classes_dir(work_dir: str) -> str:
     classes_dir = export(work_dir, "dir.src.classes")
     if classes_dir:
         return classes_dir
-    
+
     # Fallback: check for common directory structures
     common_paths = [
         "src/main/java",
-        "src/java", 
+        "src/java",
         "src",
         "java"
     ]
-    
+
     for path in common_paths:
         full_path = os.path.join(work_dir, path)
         if os.path.exists(full_path) and os.path.isdir(full_path):
@@ -101,7 +101,7 @@ def get_source_classes_dir(work_dir: str) -> str:
             for root, dirs, files in os.walk(full_path):
                 if any(f.endswith('.java') for f in files):
                     return path
-    
+
     # Default fallback
     return "src/main/java"
 
@@ -109,13 +109,13 @@ def get_source_classes_dir(work_dir: str) -> str:
 def get_test_classes_dir(work_dir: str) -> str:
     """
     Robustly detect the test classes directory for Java test files.
-    
+
     Uses defects4j export -p "dir.src.tests" to get the correct path,
     with fallback to common directory structures if export fails.
-    
+
     Args:
         work_dir: Working directory of the Defects4J project
-        
+
     Returns:
         Relative path to the test classes directory (e.g., "src/test/java" or "test")
     """
@@ -123,7 +123,7 @@ def get_test_classes_dir(work_dir: str) -> str:
     tests_dir = export(work_dir, "dir.src.tests")
     if tests_dir:
         return tests_dir
-    
+
     common_paths = [
         "src/test/java",
         "test/java",
@@ -131,7 +131,7 @@ def get_test_classes_dir(work_dir: str) -> str:
         "tests",
         "src/test",
     ]
-    
+
     for path in common_paths:
         full_path = os.path.join(work_dir, path)
         if os.path.exists(full_path) and os.path.isdir(full_path):
@@ -139,7 +139,7 @@ def get_test_classes_dir(work_dir: str) -> str:
             for root, dirs, files in os.walk(full_path):
                 if any(f.endswith('.java') for f in files):
                     return path
-    
+
     # Default fallback
     return "src/test/java"
 
@@ -147,28 +147,28 @@ def get_test_classes_dir(work_dir: str) -> str:
 def resolve_test_class_path(work_dir: str, test_class_name: str) -> Optional[str]:
     """
     Convert a test class name to its file path.
-    
+
     Args:
         work_dir: Working directory of the Defects4J project
         test_class_name: Fully qualified class name (e.g., "org.apache.commons.math3.distribution.HypergeometricDistributionTest")
-        
+
     Returns:
         Absolute path to the .java file if it exists, None otherwise
     """
-    
+
     # Get test classes directory
     tests_dir = get_test_classes_dir(work_dir)
-    
+
     # Convert class name to file path
-    # e.g., "org.apache.commons.math3.distribution.HypergeometricDistributionTest" 
+    # e.g., "org.apache.commons.math3.distribution.HypergeometricDistributionTest"
     # -> "org/apache/commons/math3/distribution/HypergeometricDistributionTest.java"
     class_path = test_class_name.replace(".", "/") + ".java"
     file_path = os.path.join(work_dir, tests_dir, class_path)
-    
+
     # Check if file exists
     if os.path.isfile(file_path):
         return os.path.abspath(file_path)
-    
+
     return None
 
 
@@ -199,21 +199,21 @@ def list_bug_ids(project_id: str) -> List[int]:
 
 def info(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
     """Get bug information from defects4j info command.
-    
+
     Args:
         project_id: Defects4J project ID (e.g., "Math")
         bug_id: Bug ID (e.g., "104")
-        
+
     Returns:
         Dictionary containing parsed bug information, or None if command fails
     """
     res = run(["defects4j", "info", "-p", project_id, "-b", bug_id])
     if res.code != 0:
         return None
-    
+
     output = res.out or ""
     lines = output.splitlines()
-    
+
     # Parse the output
     bug_info = {
         "project": project_id,
@@ -225,12 +225,12 @@ def info(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
         "root_causes": [],
         "modified_sources": []
     }
-    
+
     current_section = None
     for i, line in enumerate(lines):
         original_line = line
         line = line.strip()
-        
+
         if line.startswith("Revision ID (fixed version):"):
             # The value is on the next line
             if i + 1 < len(lines):
@@ -286,26 +286,26 @@ def info(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
             # Parse modified source line: "- org.package.Class"
             source = line[2:].strip()
             bug_info["modified_sources"].append(source)
-    
+
     return bug_info
 
 
 def get_project_build_file(project_id: str) -> Optional[str]:
     """Get the project template build file path from defects4j info command.
-    
+
     Args:
         project_id: Defects4J project ID (e.g., "Math")
-        
+
     Returns:
         Path to the project's template build file, or None if not found
     """
     res = run(["defects4j", "info", "-p", project_id])
     if res.code != 0:
         return None
-    
+
     output = res.out or ""
     lines = output.splitlines()
-    
+
     # Look for "Build file:" line
     for line in lines:
         line = line.strip()
@@ -313,33 +313,33 @@ def get_project_build_file(project_id: str) -> Optional[str]:
             # Extract the path after "Build file:"
             build_file_path = line.split("Build file:", 1)[1].strip()
             return build_file_path
-    
+
     return None
 
 
 def classify_bug(project_id: str, bug_id: str) -> Optional[Dict[str, Any]]:
     """Classify a bug as functional or exceptional based on root cause.
-    
+
     Args:
         project_id: Defects4J project ID (e.g., "Math")
         bug_id: Bug ID (e.g., "104")
-        
+
     Returns:
         Dictionary containing bug info and classification, or None if info retrieval fails
     """
     bug_info = info(project_id, bug_id)
     if not bug_info:
         return None
-    
+
     # Classify based on root cause errors
     bug_type = "exceptional"  # Default to exceptional
-    
+
     for root_cause in bug_info["root_causes"]:
         error_message = root_cause.get("error", "")
         if "junit.framework.AssertionFailedError" in error_message:
             bug_type = "functional"
             break
-    
+
     bug_info["type"] = bug_type
     return bug_info
 

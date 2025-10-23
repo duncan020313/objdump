@@ -4,9 +4,9 @@ import json
 import os
 from pathlib import Path
 import shutil
-import logging  
+import logging
 
-log = logging.getLogger(__name__)       
+log = logging.getLogger(__name__)
 
 def get_instrumenter_jar_path() -> str:
     """Get the path to the Java instrumenter JAR"""
@@ -31,7 +31,7 @@ def normalize_signature(signature: str) -> str:
 
 def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[Dict[str, Any]]:
     """Instrument a Java file using Java-based instrumenter and return method information.
-    
+
     Returns a list of dicts, each containing:
     - signature: method signature
     - javadoc: parsed JavaDoc (or None)
@@ -40,20 +40,20 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
     if not target_signatures:
         log.warning(f"No target signatures for {java_file}")
         return []
-    
+
     if not os.path.exists(java_file):
         log.warning(f"Java file not found: {java_file}")
         return []
-    
+
     # Normalize target signatures to remove 'final' modifiers
     normalized_signatures = [normalize_signature(sig) for sig in target_signatures]
-    
+
     # Get JAR path
     jar_path = get_instrumenter_jar_path()
-    
+
     # Build command: java -jar instrumenter.jar instrument <file> <sig1> <sig2> ...
     cmd = ["java", "-jar", jar_path, "instrument", java_file] + normalized_signatures
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -61,7 +61,7 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
             text=True,
             timeout=30
         )
-        
+
         if result.returncode:
             # Instrumentation failed
             log.error(f"Instrumentation failed for {java_file}. Return code: {result.returncode}")
@@ -70,10 +70,10 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
             if result.stdout:
                 log.error(f"Standard output: {result.stdout}")
             return []
-        
+
         # Parse JSON output
         output = json.loads(result.stdout)
-        
+
         # Convert to expected format
         results = []
         for item in output:
@@ -87,15 +87,15 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
                     javadoc["returns"] = None
                 if "throws" not in javadoc:
                     javadoc["throws"] = {}
-            
+
             results.append({
                 "signature": item["signature"],
                 "javadoc": javadoc,
                 "code": item["code"]
             })
-        
+
         return results
-        
+
     except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, FileNotFoundError) as e:
         # On any error, return empty list
         log.error(f"Error instrumenting {java_file}: {e}")

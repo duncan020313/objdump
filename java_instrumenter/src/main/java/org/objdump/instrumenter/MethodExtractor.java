@@ -19,7 +19,7 @@ import java.util.Set;
  * Extracts methods that intersect with changed line ranges
  */
 public class MethodExtractor {
-    
+
     /**
      * Information about a method that needs instrumentation
      */
@@ -28,33 +28,33 @@ public class MethodExtractor {
         public MethodDeclaration methodDeclaration;
         public ConstructorDeclaration constructorDeclaration;
         public boolean isConstructor;
-        
+
         public MethodInfo(String signature, MethodDeclaration method) {
             this.signature = signature;
             this.methodDeclaration = method;
             this.isConstructor = false;
         }
-        
+
         public MethodInfo(String signature, ConstructorDeclaration constructor) {
             this.signature = signature;
             this.constructorDeclaration = constructor;
             this.isConstructor = true;
         }
     }
-    
+
     /**
      * Extract changed methods from a Java file based on diff ranges
      */
     public static List<MethodInfo> extractChangedMethods(String javaFilePath, List<DiffAnalyzer.Range> diffRanges) throws IOException {
         JavaParser parser = new JavaParser();
         ParseResult<CompilationUnit> parseResult = parser.parse(new File(javaFilePath));
-        
+
         if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
             throw new IOException("Failed to parse Java file: " + javaFilePath);
         }
-        
+
         CompilationUnit cu = parseResult.getResult().get();
-        
+
         // Convert diff ranges to a set of changed line numbers
         Set<Integer> changedLines = new HashSet<>();
         for (DiffAnalyzer.Range range : diffRanges) {
@@ -62,9 +62,9 @@ public class MethodExtractor {
                 changedLines.add(line);
             }
         }
-        
+
         List<MethodInfo> methods = new ArrayList<>();
-        
+
         // Find methods that intersect with changed lines
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             if (method.getRange().isPresent() && intersectsChangedLines(method, changedLines)) {
@@ -72,7 +72,7 @@ public class MethodExtractor {
                 methods.add(new MethodInfo(signature, method));
             }
         });
-        
+
         // Find constructors that intersect with changed lines
         cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
             if (constructor.getRange().isPresent() && intersectsChangedLines(constructor, changedLines)) {
@@ -80,10 +80,10 @@ public class MethodExtractor {
                 methods.add(new MethodInfo(signature, constructor));
             }
         });
-        
+
         return methods;
     }
-    
+
     /**
      * Check if a node intersects with any changed line
      */
@@ -91,26 +91,31 @@ public class MethodExtractor {
         if (!node.getRange().isPresent()) {
             return false;
         }
-        
+
         int startLine = node.getRange().get().begin.line;
         int endLine = node.getRange().get().end.line;
-        
+
         for (int line = startLine; line <= endLine; line++) {
             if (changedLines.contains(line)) {
                 return true;
             }
         }
-        
+
         return false;
     }
-    
+
     /**
-     * Sanitize parameter name to allow only alphabetic characters
+     * Sanitize parameter name to conform to Java identifier rules: [a-zA-Z_][a-zA-Z0-9_]*
+     * Returns empty string if no valid characters remain
      */
     private static String sanitizeParamName(String paramName) {
-        return paramName.replaceAll("[^a-zA-Z]", "");
+        // Remove all characters not in [a-zA-Z0-9_]
+        String sanitized = paramName.replaceAll("[^a-zA-Z0-9_]", "");
+        // Remove leading digits to ensure it starts with [a-zA-Z_]
+        sanitized = sanitized.replaceFirst("^[0-9]+", "");
+        return sanitized;
     }
-    
+
     /**
      * Normalize parameter type by removing 'final' modifier
      */
@@ -121,7 +126,7 @@ public class MethodExtractor {
         // Remove leading 'final' keyword and any following whitespace
         return typeString.replaceFirst("^final\\s+", "").trim();
     }
-    
+
     /**
      * Normalize signature by collapsing all whitespace (including newlines) to single spaces
      */
@@ -132,19 +137,19 @@ public class MethodExtractor {
         // Replace multiple whitespace (including newlines) with single space and trim
         return signature.replaceAll("\\s+", " ").trim();
     }
-    
+
     /**
      * Generate method signature (matching Python tree-sitter format)
      */
     private static String getMethodSignature(MethodDeclaration method) {
         StringBuilder sig = new StringBuilder();
-        
+
         // Return type
         sig.append(method.getType().asString()).append(" ");
-        
+
         // Method name
         sig.append(method.getName().asString());
-        
+
         // Parameters
         sig.append("(");
         boolean first = true;
@@ -160,19 +165,19 @@ public class MethodExtractor {
             first = false;
         }
         sig.append(")");
-        
+
         return sig.toString();
     }
-    
+
     /**
      * Generate constructor signature (matching Python tree-sitter format)
      */
     private static String getConstructorSignature(ConstructorDeclaration constructor) {
         StringBuilder sig = new StringBuilder();
-        
+
         // Constructor name
         sig.append(constructor.getName().asString());
-        
+
         // Parameters
         sig.append("(");
         boolean first = true;
@@ -188,21 +193,21 @@ public class MethodExtractor {
             first = false;
         }
         sig.append(")");
-        
+
         return sig.toString();
     }
-    
+
     /**
      * Parse a Java file and find methods by signature
      */
     public static List<MethodInfo> findMethodsBySignature(String javaFilePath, List<String> targetSignatures) throws IOException {
         JavaParser parser = new JavaParser();
         ParseResult<CompilationUnit> parseResult = parser.parse(new File(javaFilePath));
-        
+
         if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
             throw new IOException("Failed to parse Java file: " + javaFilePath);
         }
-        
+
         CompilationUnit cu = parseResult.getResult().get();
         // Normalize target signatures to handle whitespace differences
         Set<String> targetSet = new HashSet<>();
@@ -210,7 +215,7 @@ public class MethodExtractor {
             targetSet.add(normalizeSignature(signature));
         }
         List<MethodInfo> methods = new ArrayList<>();
-        
+
         // Find methods with matching signatures
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             String signature = getMethodSignature(method);
@@ -219,7 +224,7 @@ public class MethodExtractor {
                 methods.add(new MethodInfo(signature, method));
             }
         });
-        
+
         // Find constructors with matching signatures
         cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
             String signature = getConstructorSignature(constructor);
@@ -228,7 +233,7 @@ public class MethodExtractor {
                 methods.add(new MethodInfo(signature, constructor));
             }
         });
-        
+
         return methods;
     }
 }

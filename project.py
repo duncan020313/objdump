@@ -42,7 +42,7 @@ def extract_compilation_errors(work_dir: str) -> str:
         os.path.join(work_dir, "ant.log"),
         os.path.join(work_dir, "maven.log")
     ]
-    
+
     for error_file in error_files:
         if os.path.isfile(error_file):
             try:
@@ -54,14 +54,14 @@ def extract_compilation_errors(work_dir: str) -> str:
                         error_lines = lines[-50:]
                     else:
                         error_lines = lines
-                    
+
                     error_text = '\n'.join(error_lines)
                     if len(error_text) > 1000:
                         error_text = error_text[:1000] + "..."
                     return error_text
             except Exception:
                 continue
-    
+
     return "No detailed error information available"
 
 
@@ -69,7 +69,7 @@ def detect_java_version(work_dir: str) -> str:
     """Detect Java version used in the project."""
     try:
         import subprocess
-        result = subprocess.run(['java', '-version'], 
+        result = subprocess.run(['java', '-version'],
                               capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             version_line = result.stderr.split('\n')[0]
@@ -81,13 +81,13 @@ def detect_java_version(work_dir: str) -> str:
 
 def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str, str]":
     """Checkout buggy and fixed versions of the project.
-    
+
     Returns:
         tuple: (buggy_dir, fixed_dir)
     """
 
 
-    
+
     if os.path.exists(work_dir):
         log.info("Removing existing work dir: %s", work_dir)
         import shutil
@@ -104,13 +104,13 @@ def checkout_versions(project_id: str, bug_id: str, work_dir: str) -> "tuple[str
     log.info("Checkout fixed version to %s", fixed_dir)
     if not defects4j.checkout(project_id, bug_id, fixed_dir, "f"):
         raise RuntimeError("checkout fixed failed")
-    
+
     return work_dir, fixed_dir
 
 
 def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -> None:
     """Setup Jackson dependencies for the project."""
-    
+
     build_system = detect(work_dir)
     classes_dir = defects4j.get_source_classes_dir(work_dir)
     download_jackson_jars(work_dir, jackson_version)
@@ -131,8 +131,8 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
 
 def compile_project(work_dir: str) -> bool:
     """Compile the project and return success status."""
-    
-    
+
+
     # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
     out_file = os.path.join(work_dir, "dump.json")
     env_vars = {"OBJDUMP_OUT": out_file}
@@ -142,8 +142,8 @@ def compile_project(work_dir: str) -> bool:
 
 def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, List[Dict[str, Any]]]:
     """Instrument changed methods in the project."""
-    
-    
+
+
     modified_classes = (defects4j.export(work_dir, "classes.modified") or "").splitlines()
     modified_classes = [s for s in (c.strip() for c in modified_classes) if s]
 
@@ -156,7 +156,7 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, 
 
     classes_dir = defects4j.get_source_classes_dir(work_dir)
     modified_class_paths = to_path(classes_dir, modified_classes) if classes_dir and modified_classes else []
-    
+
     log.info(f"# of modified classes: {len(modified_class_paths)}")
 
     changed: Dict[str, List[str]] = {}
@@ -175,8 +175,8 @@ def instrument_changed_methods_step(work_dir: str, fixed_dir: str) -> Dict[str, 
 
 def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, Any]]], work_dir: str, report_file: Optional[str] = None) -> None:
     """Generate instrumentation report."""
-    
-    
+
+
     report_items: List[Dict[str, Any]] = []
     for fpath, method_infos in instrumented_map.items():
         abs_path = os.path.abspath(fpath)
@@ -187,12 +187,12 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
                 "code": method_info["code"],
                 "javadoc": method_info["javadoc"]
             })
-    
+
     if report_file is None:
         report_file = os.path.join(work_dir, "instrumented_methods.json")
-    
+
     payload = json.dumps(report_items, indent=2, ensure_ascii=False)
-    
+
     grouped: Dict[str, List[str]] = {}
     for item in report_items:
         path = item["file"]
@@ -212,27 +212,27 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
 
 def filter_tests_by_directory_proximity(modified_classes: List[str], test_names: List[str]) -> List[str]:
     """Filter test names to only include those in the same package directory as modified source files.
-    
+
     Args:
         modified_classes: List of modified source class names (e.g., ["org.apache.commons.math3.util.FastMath"])
         test_names: List of test class names (e.g., ["org.apache.commons.math3.util.ResizableDoubleArrayTest"])
-        
+
     Returns:
         List of filtered test names that match package directories of modified classes
     """
     if not modified_classes or not test_names:
         return test_names
-    
+
     # Extract package paths from modified classes
     modified_packages = set()
     for class_name in modified_classes:
         if '.' in class_name:
             package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
             modified_packages.add(package)
-    
+
     if not modified_packages:
         return test_names
-    
+
     # Filter test names by package matching
     filtered_tests = []
     for test_name in test_names:
@@ -241,7 +241,7 @@ def filter_tests_by_directory_proximity(modified_classes: List[str], test_names:
             class_name = test_name.split('::')[0]
         else:
             class_name = test_name
-            
+
         if '.' in class_name:
             test_package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
             if test_package in modified_packages:
@@ -249,13 +249,13 @@ def filter_tests_by_directory_proximity(modified_classes: List[str], test_names:
         else:
             # If no package info, include the test (fallback)
             filtered_tests.append(test_name)
-    
+
     return filtered_tests
 
 
 def run_tests(work_dir: str) -> Dict[str, str]:
     """Run all relevant tests for the project and return their pass/fail status.
-    
+
     Returns:
         Dictionary mapping test names to their status ("correct" for passing, "wrong" for failing)
     """
@@ -265,26 +265,26 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     out_file = os.path.join(work_dir, "dump.json")
     env_vars = {"OBJDUMP_OUT": out_file}
-    
+
     defects4j.compile(work_dir, env=env_vars)
-    
+
     # Get all relevant tests (includes trigger tests)
     relevant_tests = defects4j.export(work_dir, "tests.relevant")
     trigger_tests = defects4j.export(work_dir, "tests.trigger")
-    
+
     assert relevant_tests is not None
     assert trigger_tests is not None
-    
+
     # Get modified classes for filtering
     modified_classes_raw = defects4j.export(work_dir, "classes.modified")
     modified_classes = [s.strip() for s in modified_classes_raw.splitlines() if s.strip()] if modified_classes_raw else []
-    
+
     test_results = {}
-    
+
     # Filter relevant tests by directory proximity
     names_raw = [t.strip() for t in relevant_tests.splitlines() if t.strip()]
     log.info(f"Original relevant tests: {len(names_raw)}")
-    
+
     if modified_classes:
         log.info(f"Modified classes: {modified_classes}")
         names = filter_tests_by_directory_proximity(modified_classes, names_raw)
@@ -292,24 +292,24 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     else:
         names = names_raw
         log.info("No modified classes found, using all relevant tests")
-    
+
     trigger_set = set()
     if trigger_tests:
         trigger_set = {t.strip() for t in trigger_tests.splitlines() if t.strip()}
         log.info(f"Trigger tests: {len(trigger_set)}")
-    
+
     # Expand test classes into individual methods
     expanded_test_names = set(expand_test_classes(work_dir, names, log))
-    
+
     def run_test(test_name: str, is_correct: bool) -> bool:
         safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
         dump_path = os.path.join(dumps_dir, f"{safe}.json")
         abs_dump_path = os.path.abspath(dump_path)
         per_test_env = {"OBJDUMP_OUT": abs_dump_path}
-        
+
         # Run the test and check the result
         test_result = defects4j.test(work_dir, [test_name], env=per_test_env)
-        
+
         # Handle different test results
         if test_result == "timeout":
             # Test timed out - skip it (don't add to test_results)
@@ -323,24 +323,24 @@ def run_tests(work_dir: str) -> Dict[str, str]:
             # Test failed
             test_results[test_name] = "wrong"
             return True
-    
+
     correct_tests = expanded_test_names - trigger_set
-    
+
     log.info(f"Correct tests (after filtering): {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
     log.info(f"Total tests to run: {len(expanded_test_names)}")
-    
+
     def run_test_wrapper(args):
         test_name, is_correct = args
         return run_test(test_name, is_correct)
-    
+
     # Prepare all test tasks
     test_tasks = []
     for test_name in correct_tests:
         test_tasks.append((test_name, True))
     for test_name in trigger_set:
         test_tasks.append((test_name, False))
-    
+
     # Run tests in parallel
     with ThreadPoolExecutor(max_workers=16) as executor:
         futures = [executor.submit(run_test_wrapper, task) for task in test_tasks]
@@ -352,12 +352,12 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
     """
     Expand test class names into individual test methods using multithreading.
-    
+
     Args:
         work_dir: Working directory of the Defects4J project
         test_names: List of test names (may include classes or individual methods)
         log: Logger instance
-        
+
     Returns:
         List of expanded test names (individual methods or original names if already methods)
     """
@@ -367,39 +367,39 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
         if "::" in test_name:
             # Already a specific method, use as-is
             return [test_name]
-        
+
         # This is a test class, try to expand it
         log.debug(f"Expanding test class: {test_name}")
-        
+
         # Resolve test class to file path
         test_file_path = defects4j.resolve_test_class_path(work_dir, test_name)
         if not test_file_path:
             log.error(f"Could not resolve test class file for: {test_name}")
             # Fall back to running the entire class
             return [test_name]
-        
+
         # Extract test methods from the class file
         test_methods = extract_test_methods(test_file_path)
         if not test_methods:
             log.error(f"Could not extract test methods from: {test_file_path}")
             # Fall back to running the entire class
             return [test_name]
-        
+
         # Add each test method with class name prefix
         expanded_methods = []
         for method_name in test_methods:
             full_test_name = f"{test_name}::{method_name}"
             expanded_methods.append(full_test_name)
-        
+
         log.debug(f"Expanded {test_name} into {len(test_methods)} methods")
         return expanded_methods
-    
+
     # Use multithreading to expand test classes in parallel
     expanded_tests = []
     with ThreadPoolExecutor() as executor:
         # Submit all test expansion tasks
         futures = [executor.submit(expand_single_test, test_name) for test_name in test_names]
-        
+
         # Collect results as they complete
         for future in as_completed(futures):
             try:
@@ -409,14 +409,14 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
                 log.error(f"Error expanding test class: {e}")
                 # Add the original test name as fallback
                 expanded_tests.append(test_names[futures.index(future)])
-    
+
     return expanded_tests
 
 
 def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results: Optional[Dict[str, str]] = None) -> Optional[str]:
     """Collect dump files after test execution."""
-    
-    
+
+
     # Use centralized location from environment variable or default
     output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
     collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base, test_results)
@@ -424,39 +424,39 @@ def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results
         log.info(f"Collected dump files to: {collection_dir}")
     else:
         log.warning("Failed to collect dump files")
-    
+
     return collection_dir
 
 
 def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = "2.13.0", report_file: Optional[str] = None) -> None:
     """Run the complete workflow using step functions."""
-    
+
 
     # Step 1: Checkout buggy and fixed versions
     buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
-    
+
     # Step 2: Setup Jackson dependencies
     setup_jackson_dependencies(work_dir, jackson_version)
-    
+
     # Step 3: Compile project
     if not compile_project(work_dir):
         raise RuntimeError("Initial compilation failed")
-    
+
     # Step 4: Instrument changed methods
     instrumented_map = instrument_changed_methods_step(work_dir, fixed_dir)
-    
+
     # Step 5: Generate instrumentation report
     generate_instrumentation_report(instrumented_map, work_dir, report_file)
-    
+
     # Check if any methods were instrumented
     total_instrumented = sum(len(method_infos) for method_infos in instrumented_map.values()) if instrumented_map else 0
     if total_instrumented == 0:
         log.info("No methods were instrumented, skipping test execution")
         return
-    
+
     # Step 6: Run tests
     test_results = run_tests(work_dir)
-    
+
     # Step 7: Collect dump files
     collect_dump_files(work_dir, project_id, bug_id, test_results)
 
@@ -487,11 +487,11 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     # Step 1: Checkout buggy and fixed versions
     _, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
     status["stages"]["checkout"] = "ok"
-    
+
     # Step 2: Setup Jackson dependencies
     setup_jackson_dependencies(work_dir, jackson_version)
     status["stages"]["jackson"] = "ok"
-    
+
     # Step 3: Compile project
     if not compile_project(work_dir):
         status["stages"]["compile"] = "fail"
@@ -534,16 +534,16 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
 
     # Step 6: Run tests (all relevant tests)
     test_results = run_tests(work_dir)
-    
+
     # Update status with test results
     correct_tests = [name for name, status in test_results.items() if status == "correct"]
     wrong_tests = [name for name, status in test_results.items() if status == "wrong"]
-    
+
     status["stages"]["tests"]["status"] = "ok" if test_results else "fail"
     status["stages"]["tests"]["correct"] = correct_tests
     status["stages"]["tests"]["wrong"] = wrong_tests
     status["stages"]["tests"]["total"] = len(test_results)
-    
+
     # Store test results for collection phase
     status["test_results"] = test_results
 

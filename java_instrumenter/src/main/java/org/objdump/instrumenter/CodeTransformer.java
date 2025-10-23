@@ -27,7 +27,7 @@ import java.util.Set;
  * Transforms Java code to add instrumentation
  */
 public class CodeTransformer {
-    
+
     /**
      * Result of code transformation
      */
@@ -35,27 +35,27 @@ public class CodeTransformer {
         public String signature;
         public JavaDocExtractor.JavaDocInfo javadoc;
         public String code;
-        
+
         public TransformResult(String signature, JavaDocExtractor.JavaDocInfo javadoc, String code) {
             this.signature = signature;
             this.javadoc = javadoc;
             this.code = code;
         }
     }
-    
+
     /**
      * Instrument a Java file by transforming target methods
      */
     public static List<TransformResult> instrumentJavaFile(String javaFilePath, List<String> targetSignatures) throws IOException {
         JavaParser parser = new JavaParser();
         ParseResult<CompilationUnit> parseResult = parser.parse(new File(javaFilePath));
-        
+
         if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
             throw new IOException("Failed to parse Java file: " + javaFilePath);
         }
-        
+
         CompilationUnit cu = parseResult.getResult().get();
-        
+
         // Find methods to instrument from the SAME CompilationUnit
         // Normalize target signatures to handle whitespace differences
         Set<String> targetSet = new HashSet<>();
@@ -63,7 +63,7 @@ public class CodeTransformer {
             targetSet.add(normalizeSignature(signature));
         }
         List<MethodExtractor.MethodInfo> methodsToInstrument = new ArrayList<>();
-        
+
         // Find methods with matching signatures
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             String signature = getMethodSignature(method);
@@ -72,7 +72,7 @@ public class CodeTransformer {
                 methodsToInstrument.add(new MethodExtractor.MethodInfo(signature, method));
             }
         });
-        
+
         // Find constructors with matching signatures
         cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
             String signature = getConstructorSignature(constructor);
@@ -81,21 +81,21 @@ public class CodeTransformer {
                 methodsToInstrument.add(new MethodExtractor.MethodInfo(signature, constructor));
             }
         });
-        
+
         // Check for partial matches and report missing signatures
         if (!methodsToInstrument.isEmpty() && methodsToInstrument.size() < targetSignatures.size()) {
             Set<String> foundSignatures = new HashSet<>();
             for (MethodExtractor.MethodInfo methodInfo : methodsToInstrument) {
                 foundSignatures.add(methodInfo.signature);
             }
-            
+
             List<String> missingSignatures = new ArrayList<>();
             for (String targetSig : targetSignatures) {
                 if (!foundSignatures.contains(targetSig)) {
                     missingSignatures.add(targetSig);
                 }
             }
-            
+
             if (!missingSignatures.isEmpty()) {
                 System.err.println("Warning: Some target signatures were not found in " + javaFilePath + ":");
                 for (String missing : missingSignatures) {
@@ -104,7 +104,7 @@ public class CodeTransformer {
                 System.err.println("Found " + methodsToInstrument.size() + " out of " + targetSignatures.size() + " requested signatures.");
             }
         }
-        
+
         if (methodsToInstrument.isEmpty()) {
             // Collect all available method signatures for debugging
             List<String> availableMethods = new ArrayList<>();
@@ -114,7 +114,7 @@ public class CodeTransformer {
             cu.findAll(ConstructorDeclaration.class).forEach(constructor -> {
                 availableMethods.add(getConstructorSignature(constructor));
             });
-            
+
             // Create detailed error message
             StringBuilder errorMsg = new StringBuilder();
             errorMsg.append("No matching methods/constructors found in file: ").append(javaFilePath).append("\n");
@@ -126,17 +126,17 @@ public class CodeTransformer {
             for (String sig : availableMethods) {
                 errorMsg.append("  - ").append(sig).append("\n");
             }
-            
+
             throw new IOException(errorMsg.toString());
         }
-        
+
         List<TransformResult> results = new ArrayList<>();
-        
+
         // Collect method info before instrumentation
         for (MethodExtractor.MethodInfo methodInfo : methodsToInstrument) {
             JavaDocExtractor.JavaDocInfo javadoc;
             String originalCode;
-            
+
             if (methodInfo.isConstructor) {
                 javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.constructorDeclaration, cu, javaFilePath);
                 originalCode = JavaDocExtractor.extractMethodCode(methodInfo.constructorDeclaration);
@@ -144,13 +144,13 @@ public class CodeTransformer {
                 javadoc = JavaDocExtractor.extractJavaDoc(methodInfo.methodDeclaration, cu, javaFilePath);
                 originalCode = JavaDocExtractor.extractMethodCode(methodInfo.methodDeclaration);
             }
-            
+
             results.add(new TransformResult(methodInfo.signature, javadoc, originalCode));
         }
-        
+
         // Add necessary imports
         addImportsIfNeeded(cu);
-        
+
         // Instrument each method
         for (MethodExtractor.MethodInfo methodInfo : methodsToInstrument) {
             if (methodInfo.isConstructor) {
@@ -159,22 +159,22 @@ public class CodeTransformer {
                 instrumentMethod(methodInfo.methodDeclaration);
             }
         }
-        
+
         // Write instrumented code back to file
         try (FileWriter writer = new FileWriter(javaFilePath, StandardCharsets.UTF_8)) {
             writer.write(cu.toString());
         }
-        
+
         return results;
     }
-    
+
     /**
      * Add necessary imports to the compilation unit
      */
     private static void addImportsIfNeeded(CompilationUnit cu) {
         boolean hasDumpObj = false;
         boolean hasDebugDump = false;
-        
+
         for (ImportDeclaration imp : cu.getImports()) {
             String impName = imp.getNameAsString();
             if (impName.equals("org.instrument.DumpObj")) {
@@ -184,7 +184,7 @@ public class CodeTransformer {
                 hasDebugDump = true;
             }
         }
-        
+
         if (!hasDumpObj) {
             cu.addImport("org.instrument.DumpObj");
         }
@@ -192,7 +192,7 @@ public class CodeTransformer {
             cu.addImport("org.instrument.DebugDump");
         }
     }
-    
+
     /**
      * Instrument a regular method
      */
@@ -201,73 +201,73 @@ public class CodeTransformer {
         if (!hasAnnotation(method, "DumpObj")) {
             method.addAnnotation("DumpObj");
         }
-        
+
         // Get method details
         boolean isStatic = method.isStatic();
         boolean isVoid = method.getType().asString().equals("void");
         String returnType = method.getType().asString();
         List<Parameter> parameters = method.getParameters();
-        
+
         // Extract method signature and file path for instrumentation
         String methodSignature = getMethodSignature(method);
         String filePath = getCurrentFilePath(method);
-        
+
         // Create new method body
         BlockStmt newBody = new BlockStmt();
-        
+
         // Generate invocation ID
         newBody.addStatement(createIdDeclaration());
-        
+
         // Generate parameter map
         newBody.addStatement(createParamMapDeclaration());
         for (int i = 0; i < parameters.size(); i++) {
-            newBody.addStatement(createParamPut(i, sanitizeParamName(parameters.get(i).getNameAsString())));
+            newBody.addStatement(createParamPut(i, parameters.get(i).getNameAsString()));
         }
-        
+
         // Write entry log
         newBody.addStatement(createEntryCall(isStatic, methodSignature, filePath));
-        
+
         // Declare return variable if needed (before any statements)
         if (!isVoid) {
             newBody.addStatement(createReturnVarDeclaration(returnType));
         }
-        
+
         // Get original body statements
         boolean blockTerminated = false;
         if (method.getBody().isPresent()) {
             BlockStmt originalBody = method.getBody().get();
-            
+
             // Transform return statements
             List<Statement> transformedStatements = transformStatementsWithReturns(
-                originalBody.getStatements(), 
-                returnType, 
-                isStatic, 
+                originalBody.getStatements(),
+                returnType,
+                isStatic,
                 isVoid,
                 !isVoid,  // hasReturnVar = true if not void
                 methodSignature,
                 filePath
             );
-            
+
             // Add transformed statements
             for (Statement stmt : transformedStatements) {
                 newBody.addStatement(stmt);
             }
-            
+
             // Check if block is terminated with return/throw
             if (!transformedStatements.isEmpty()) {
                 Statement lastStmt = transformedStatements.get(transformedStatements.size() - 1);
                 blockTerminated = isTerminatingStatement(lastStmt);
             }
         }
-        
+
         // Add exit log at end for void methods only if block is not already terminated
         if (isVoid && !blockTerminated) {
             newBody.addStatement(createExitCall(isStatic, null, methodSignature, filePath));
         }
-        
+
         method.setBody(newBody);
     }
-    
+
     /**
      * Instrument a constructor
      */
@@ -276,17 +276,17 @@ public class CodeTransformer {
         if (!hasAnnotation(constructor, "DumpObj")) {
             constructor.addAnnotation("DumpObj");
         }
-        
+
         // Extract constructor signature and file path for instrumentation
         String constructorSignature = getConstructorSignature(constructor);
         String filePath = getCurrentFilePath(constructor);
-        
+
         List<Parameter> parameters = constructor.getParameters();
         BlockStmt originalBody = constructor.getBody();
-        
+
         // Create new body
         BlockStmt newBody = new BlockStmt();
-        
+
         // Check for super()/this() call
         Statement firstStmt = null;
         boolean hasSuperOrThis = false;
@@ -306,23 +306,23 @@ public class CodeTransformer {
                 newBody.addStatement(firstStmt);
             }
         }
-        
+
         // Add instrumentation
         newBody.addStatement(createIdDeclaration());
         newBody.addStatement(createParamMapDeclaration());
         for (int i = 0; i < parameters.size(); i++) {
-            newBody.addStatement(createParamPut(i, sanitizeParamName(parameters.get(i).getNameAsString())));
+            newBody.addStatement(createParamPut(i, parameters.get(i).getNameAsString()));
         }
         newBody.addStatement(createEntryCall(false, constructorSignature, filePath));
-        
+
         // Add remaining statements
         int startIdx = hasSuperOrThis ? 1 : 0;
         for (int i = startIdx; i < originalBody.getStatements().size(); i++) {
             Statement stmt = originalBody.getStatements().get(i);
             List<Statement> transformed = transformStatementsWithReturns(
-                new NodeList<>(stmt), 
-                "void", 
-                false, 
+                new NodeList<>(stmt),
+                "void",
+                false,
                 true,
                 false,  // constructors don't need return var
                 constructorSignature,
@@ -332,22 +332,22 @@ public class CodeTransformer {
                 newBody.addStatement(s);
             }
         }
-        
+
         // Check if block is terminated with return/throw
         boolean blockTerminated = false;
         if (!newBody.getStatements().isEmpty()) {
             Statement lastStmt = newBody.getStatements().get(newBody.getStatements().size() - 1);
             blockTerminated = isTerminatingStatement(lastStmt);
         }
-        
+
         // Add exit log at end only if block is not already terminated
         if (!blockTerminated) {
             newBody.addStatement(createExitCall(false, null, constructorSignature, filePath));
         }
-        
+
         constructor.setBody(newBody);
     }
-    
+
     /**
      * Check if a statement is a terminating statement (return or throw)
      */
@@ -365,17 +365,17 @@ public class CodeTransformer {
         }
         return false;
     }
-    
+
     /**
      * Transform statements, handling return and throw statements specially
      */
     private static List<Statement> transformStatementsWithReturns(NodeList<Statement> statements, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar, String methodSignature, String filePath) {
         List<Statement> transformed = new ArrayList<>();
-        
+
         for (Statement stmt : statements) {
             if (stmt instanceof ReturnStmt) {
                 ReturnStmt returnStmt = (ReturnStmt) stmt;
-                
+
                 if (isVoid || !returnStmt.getExpression().isPresent()) {
                     // Void return
                     transformed.add(createExitCall(isStatic, null, methodSignature, filePath));
@@ -383,7 +383,7 @@ public class CodeTransformer {
                 } else {
                     // Return with expression - variable already declared at method level
                     Expression returnExpr = returnStmt.getExpression().get();
-                    
+
                     // Assign to return variable
                     transformed.add(new ExpressionStmt(
                         new AssignExpr(
@@ -392,10 +392,10 @@ public class CodeTransformer {
                             AssignExpr.Operator.ASSIGN
                         )
                     ));
-                    
+
                     // Write exit log
                     transformed.add(createExitCall(isStatic, "__objdump_ret", methodSignature, filePath));
-                    
+
                     // Return the variable
                     transformed.add(new ReturnStmt(new NameExpr("__objdump_ret")));
                 }
@@ -412,9 +412,9 @@ public class CodeTransformer {
                 if (stmt instanceof BlockStmt) {
                     BlockStmt block = (BlockStmt) stmt;
                     List<Statement> nestedTransformed = transformStatementsWithReturns(
-                        block.getStatements(), 
-                        returnType, 
-                        isStatic, 
+                        block.getStatements(),
+                        returnType,
+                        isStatic,
                         isVoid,
                         hasReturnVar,
                         methodSignature,
@@ -453,27 +453,27 @@ public class CodeTransformer {
                     transformed.add(forEachStmt);
                 } else if (stmt instanceof TryStmt) {
                     TryStmt tryStmt = (TryStmt) stmt;
-                    
+
                     // Transform try block
                     BlockStmt tryBlock = tryStmt.getTryBlock();
                     List<Statement> tryTransformed = transformStatementsWithReturns(
-                        tryBlock.getStatements(), 
-                        returnType, 
-                        isStatic, 
+                        tryBlock.getStatements(),
+                        returnType,
+                        isStatic,
                         isVoid,
                         hasReturnVar,
                         methodSignature,
                         filePath
                     );
                     tryStmt.setTryBlock(new BlockStmt(new NodeList<>(tryTransformed)));
-                    
+
                     // Transform catch blocks
                     for (com.github.javaparser.ast.stmt.CatchClause catchClause : tryStmt.getCatchClauses()) {
                         BlockStmt catchBlock = catchClause.getBody();
                         List<Statement> catchTransformed = transformStatementsWithReturns(
-                            catchBlock.getStatements(), 
-                            returnType, 
-                            isStatic, 
+                            catchBlock.getStatements(),
+                            returnType,
+                            isStatic,
                             isVoid,
                             hasReturnVar,
                             methodSignature,
@@ -481,14 +481,14 @@ public class CodeTransformer {
                         );
                         catchClause.setBody(new BlockStmt(new NodeList<>(catchTransformed)));
                     }
-                    
+
                     // Transform finally block if present
                     if (tryStmt.getFinallyBlock().isPresent()) {
                         BlockStmt finallyBlock = tryStmt.getFinallyBlock().get();
                         List<Statement> finallyTransformed = transformStatementsWithReturns(
-                            finallyBlock.getStatements(), 
-                            returnType, 
-                            isStatic, 
+                            finallyBlock.getStatements(),
+                            returnType,
+                            isStatic,
                             isVoid,
                             hasReturnVar,
                             methodSignature,
@@ -496,17 +496,17 @@ public class CodeTransformer {
                         );
                         tryStmt.setFinallyBlock(new BlockStmt(new NodeList<>(finallyTransformed)));
                     }
-                    
+
                     transformed.add(tryStmt);
                 } else {
                     transformed.add(stmt);
                 }
             }
         }
-        
+
         return transformed;
     }
-    
+
     private static Statement transformSingleStatement(Statement stmt, String returnType, boolean isStatic, boolean isVoid, boolean hasReturnVar, String methodSignature, String filePath) {
         if (stmt instanceof BlockStmt) {
             BlockStmt block = (BlockStmt) stmt;
@@ -521,7 +521,7 @@ public class CodeTransformer {
             } else {
                 return new BlockStmt(new NodeList<>(transformed));
             }
-        } else if (stmt instanceof IfStmt || stmt instanceof WhileStmt || stmt instanceof ForStmt || 
+        } else if (stmt instanceof IfStmt || stmt instanceof WhileStmt || stmt instanceof ForStmt ||
                    stmt instanceof DoStmt || stmt instanceof ForEachStmt || stmt instanceof TryStmt) {
             // These need recursive transformation
             List<Statement> transformed = transformStatementsWithReturns(new NodeList<>(stmt), returnType, isStatic, isVoid, hasReturnVar, methodSignature, filePath);
@@ -533,7 +533,7 @@ public class CodeTransformer {
         }
         return stmt;
     }
-    
+
     /**
      * Create invocation ID declaration: String __objdump_id = DebugDump.newInvocationId();
      */
@@ -550,7 +550,7 @@ public class CodeTransformer {
             new VariableDeclarationExpr(idVar, Modifier.finalModifier())
         );
     }
-    
+
     /**
      * Create parameter map declaration
      */
@@ -566,23 +566,28 @@ public class CodeTransformer {
         );
         return new ExpressionStmt(new VariableDeclarationExpr(mapVar));
     }
-    
+
     /**
      * Create parameter put statement
+     * Sanitizes the parameter name and falls back to "param{index}" if sanitization results in empty string
      */
     private static Statement createParamPut(int index, String paramName) {
+        String sanitized = sanitizeParamName(paramName);
+        // Fall back to "param{index}" if sanitization results in empty string
+        String finalName = sanitized.isEmpty() ? ("param" + index) : sanitized;
+
         return new ExpressionStmt(
             new MethodCallExpr(
                 new NameExpr("__objdump_params"),
                 "put",
                 new NodeList<>(
-                    new StringLiteralExpr(paramName),
-                    new NameExpr(paramName)
+                    new StringLiteralExpr(finalName),
+                    new NameExpr(finalName)
                 )
             )
         );
     }
-    
+
     /**
      * Create entry call: DebugDump.writeEntry(this/null, params, id, methodSig, filePath);
      */
@@ -601,7 +606,7 @@ public class CodeTransformer {
             )
         );
     }
-    
+
     /**
      * Create exit call: DebugDump.writeExit(this/null, null, retValue, id, methodSig, filePath);
      */
@@ -615,7 +620,7 @@ public class CodeTransformer {
         } else {
             retExpr = new NullLiteralExpr();
         }
-        
+
         return new ExpressionStmt(
             new MethodCallExpr(
                 new NameExpr("DebugDump"),
@@ -631,7 +636,7 @@ public class CodeTransformer {
             )
         );
     }
-    
+
     /**
      * Create return variable declaration
      */
@@ -642,7 +647,7 @@ public class CodeTransformer {
         );
         return new ExpressionStmt(new VariableDeclarationExpr(retVar));
     }
-    
+
     /**
      * Check if a method has a specific annotation
      */
@@ -650,7 +655,7 @@ public class CodeTransformer {
         return method.getAnnotations().stream()
             .anyMatch(a -> a.getNameAsString().equals(annotationName));
     }
-    
+
     /**
      * Check if a constructor has a specific annotation
      */
@@ -658,7 +663,7 @@ public class CodeTransformer {
         return constructor.getAnnotations().stream()
             .anyMatch(a -> a.getNameAsString().equals(annotationName));
     }
-    
+
     /**
      * Normalize parameter type by removing 'final' modifier
      */
@@ -669,7 +674,7 @@ public class CodeTransformer {
         // Remove leading 'final' keyword and any following whitespace
         return typeString.replaceFirst("^final\\s+", "").trim();
     }
-    
+
     /**
      * Normalize signature by collapsing all whitespace (including newlines) to single spaces
      */
@@ -680,7 +685,7 @@ public class CodeTransformer {
         // Replace multiple whitespace (including newlines) with single space and trim
         return signature.replaceAll("\\s+", " ").trim();
     }
-    
+
     /**
      * Generate method signature (matching Python tree-sitter format)
      */
@@ -704,7 +709,7 @@ public class CodeTransformer {
         sig.append(")");
         return sig.toString();
     }
-    
+
     /**
      * Generate constructor signature (matching Python tree-sitter format)
      */
@@ -727,7 +732,7 @@ public class CodeTransformer {
         sig.append(")");
         return sig.toString();
     }
-    
+
     /**
      * Get the current file path for instrumentation
      */
@@ -737,13 +742,13 @@ public class CodeTransformer {
         if (cu.isPresent()) {
             CompilationUnit compilationUnit = cu.get();
             StringBuilder path = new StringBuilder();
-            
+
             // Add package name if present
             if (compilationUnit.getPackageDeclaration().isPresent()) {
                 String packageName = compilationUnit.getPackageDeclaration().get().getNameAsString();
                 path.append(packageName.replace('.', '/')).append('/');
             }
-            
+
             // Add class name
             Optional<String> className = compilationUnit.findFirst(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)
                 .map(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration::getNameAsString);
@@ -752,20 +757,25 @@ public class CodeTransformer {
             } else {
                 path.append("Unknown.java");
             }
-            
+
             return path.toString();
         }
-        
+
         return "Unknown.java";
     }
-    
+
     /**
-     * Sanitize parameter name to allow only alphabetic characters
+     * Sanitize parameter name to conform to Java identifier rules: [a-zA-Z_][a-zA-Z0-9_]*
+     * Returns empty string if no valid characters remain (caller should handle fallback)
      */
     private static String sanitizeParamName(String paramName) {
-        return paramName.replaceAll("[^a-zA-Z0-9]", "");
+        // Remove all characters not in [a-zA-Z0-9_]
+        String sanitized = paramName.replaceAll("[^a-zA-Z0-9_]", "");
+        // Remove leading digits to ensure it starts with [a-zA-Z_]
+        sanitized = sanitized.replaceFirst("^[0-9]+", "");
+        return sanitized;
     }
-    
+
     /**
      * Get the current file path for instrumentation (constructor version)
      */
@@ -775,13 +785,13 @@ public class CodeTransformer {
         if (cu.isPresent()) {
             CompilationUnit compilationUnit = cu.get();
             StringBuilder path = new StringBuilder();
-            
+
             // Add package name if present
             if (compilationUnit.getPackageDeclaration().isPresent()) {
                 String packageName = compilationUnit.getPackageDeclaration().get().getNameAsString();
                 path.append(packageName.replace('.', '/')).append('/');
             }
-            
+
             // Add class name
             Optional<String> className = compilationUnit.findFirst(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)
                 .map(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration::getNameAsString);
@@ -790,10 +800,10 @@ public class CodeTransformer {
             } else {
                 path.append("Unknown.java");
             }
-            
+
             return path.toString();
         }
-        
+
         return "Unknown.java";
     }
 }
