@@ -134,8 +134,11 @@ public class MethodExtractor {
         if (signature == null) {
             return null;
         }
-        // Replace multiple whitespace (including newlines) with single space and trim
-        return signature.replaceAll("\\s+", " ").trim();
+        // 1. Collapse whitespace (including newlines)
+        String normalized = signature.replaceAll("\\s+", " ").trim();
+        // 2. Remove special characters (keep only alphanumeric, spaces, parens, commas, brackets)
+        normalized = normalized.replaceAll("[^a-zA-Z0-9\\s(),<>\\{\\}\\[\\]]", "");
+        return normalized;
     }
 
     /**
