@@ -140,57 +140,51 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
 
     # Process each JSON file
     for json_file in json_files:
-        try:
-            if backup:
-                backup_path = str(json_file) + '.backup'
-                os.rename(str(json_file), backup_path)
-                input_path = backup_path
-            else:
-                input_path = str(json_file)
+        if backup:
+            backup_path = str(json_file) + '.backup'
+            os.rename(str(json_file), backup_path)
+            input_path = backup_path
+        else:
+            input_path = str(json_file)
 
-            # Read JSON array
-            with open(input_path, 'r', encoding='utf-8') as infile:
-                data_array = json.load(infile)
+        # Read JSON array
+        with open(input_path, 'r', encoding='utf-8') as infile:
+            data_array = json.load(infile)
 
-            # Process each record in the array
-            cleaned_records = []
-            for data in data_array:
-                try:
-                    # Remove MAX_DEPTH_REACHED entries
-                    cleaned_data = remove_max_depth_reached_recursive(data)
+        # Process each record in the array
+        cleaned_records = []
+        for data in data_array:
+            try:
+                # Remove MAX_DEPTH_REACHED entries
+                cleaned_data = remove_max_depth_reached_recursive(data)
 
-                    # Extract method metadata
-                    method_signature = cleaned_data.get("method_signature", "unknown")
-                    file_path = cleaned_data.get("file_path", "unknown")
-                    phase = cleaned_data.get("phase")
+                # Extract method metadata
+                method_signature = cleaned_data.get("method_signature", "unknown")
+                file_path = cleaned_data.get("file_path", "unknown")
+                phase = cleaned_data.get("phase")
 
-                    if phase in ("entry", "exit"):
-                        key = (file_path, method_signature, phase)
-                        if key not in method_records:
-                            method_records[key] = []
-                        method_records[key].append(cleaned_data)
-                        stats['total_lines_processed'] += 1
+                if phase in ("entry", "exit"):
+                    key = (file_path, method_signature, phase)
+                    if key not in method_records:
+                        method_records[key] = []
+                    method_records[key].append(cleaned_data)
+                    stats['total_lines_processed'] += 1
 
-                    cleaned_records.append(cleaned_data)
+                cleaned_records.append(cleaned_data)
 
-                except Exception as e:
-                    log.warning(f"Error processing record in {json_file}: {e}")
-                    continue
+            except Exception as e:
+                log.warning(f"Error processing record in {json_file}: {e}")
+                continue
 
-            # Write cleaned data back to original file as JSON array
-            with open(str(json_file), 'w', encoding='utf-8') as outfile:
-                json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
+        # Write cleaned data back to original file as JSON array
+        with open(str(json_file), 'w', encoding='utf-8') as outfile:
+            json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
 
-            stats['json_files_processed'] += 1
+        stats['json_files_processed'] += 1
 
-            # Remove backup if processing was successful
-            if backup and os.path.exists(input_path):
-                os.remove(input_path)
-
-        except Exception as e:
-            log.error(f"Error processing {json_file}: {e}")
-            stats['errors'] += 1
-
+        # Remove backup if processing was successful
+        if backup and os.path.exists(input_path):
+            os.remove(input_path)
     # Generate schemas for each method
     schemas_dir = os.path.join(dump_dir, "schemas")
     os.makedirs(schemas_dir, exist_ok=True)
@@ -275,57 +269,58 @@ def process_multiple_directories_by_method(
 
         # Process each JSON file in this directory
         for json_file in json_files:
-            try:
-                if backup:
-                    backup_path = str(json_file) + '.backup'
-                    os.rename(str(json_file), backup_path)
-                    input_path = backup_path
-                else:
-                    input_path = str(json_file)
+            if backup:
+                backup_path = str(json_file) + '.backup'
+                os.rename(str(json_file), backup_path)
+                input_path = backup_path
+            else:
+                input_path = str(json_file)
 
-                # Read JSON array
-                with open(input_path, 'r', encoding='utf-8') as infile:
-                    data_array = json.load(infile)
+            # Read JSON array
+            with open(input_path, 'r', encoding='utf-8') as infile:
+                file_contents = infile.read()
+                if not file_contents.strip():
+                    continue
+                try:
+                    data_array = json.loads(file_contents)
+                except json.JSONDecodeError as e:
+                    log.error(f"Invalid JSON in {json_file}: {e}")
+                    continue
 
-                # Process each record in the array
-                cleaned_records = []
-                for data in data_array:
-                    try:
-                        # Remove MAX_DEPTH_REACHED entries
-                        cleaned_data = remove_max_depth_reached_recursive(data)
+            # Process each record in the array
+            cleaned_records = []
+            for data in data_array:
+                try:
+                    # Remove MAX_DEPTH_REACHED entries
+                    cleaned_data = remove_max_depth_reached_recursive(data)
 
-                        # Extract method metadata
-                        method_signature = cleaned_data.get("method_signature", "unknown")
-                        file_path = cleaned_data.get("file_path", "unknown")
-                        phase = cleaned_data.get("phase")
+                    # Extract method metadata
+                    method_signature = cleaned_data.get("method_signature", "unknown")
+                    file_path = cleaned_data.get("file_path", "unknown")
+                    phase = cleaned_data.get("phase")
 
-                        if phase in ("entry", "exit"):
-                            key = (file_path, method_signature, phase)
-                            if key not in method_records:
-                                method_records[key] = []
-                            method_records[key].append(cleaned_data)
-                            stats['total_lines_processed'] += 1
+                    if phase in ("entry", "exit"):
+                        key = (file_path, method_signature, phase)
+                        if key not in method_records:
+                            method_records[key] = []
+                        method_records[key].append(cleaned_data)
+                        stats['total_lines_processed'] += 1
 
-                        cleaned_records.append(cleaned_data)
+                    cleaned_records.append(cleaned_data)
 
-                    except Exception as e:
-                        log.warning(f"Error processing record in {json_file}: {e}")
-                        continue
+                except Exception as e:
+                    log.warning(f"Error processing record in {json_file}: {e}")
+                    continue
 
-                # Write cleaned data back to original file as JSON array
-                with open(str(json_file), 'w', encoding='utf-8') as outfile:
-                    json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
+            # Write cleaned data back to original file as JSON array
+            with open(str(json_file), 'w', encoding='utf-8') as outfile:
+                json.dump(cleaned_records, outfile, ensure_ascii=False, indent=2, sort_keys=True)
 
-                stats['json_files_processed'] += 1
+            stats['json_files_processed'] += 1
 
-                # Remove backup if processing was successful
-                if backup and os.path.exists(input_path):
-                    os.remove(input_path)
-
-            except Exception as e:
-                log.error(f"Error processing {json_file}: {e}")
-                stats['errors'] += 1
-
+            # Remove backup if processing was successful
+            if backup and os.path.exists(input_path):
+                os.remove(input_path)
     # Generate unified schemas for all methods
     os.makedirs(schemas_output_dir, exist_ok=True)
 
@@ -385,7 +380,10 @@ def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = 
     try:
         # Read JSON array
         with open(input_path, 'r', encoding='utf-8') as infile:
-            data_array = json.load(infile)
+            file_contents = infile.read()
+            if not file_contents.strip():
+                return processed_count
+            data_array = json.loads(file_contents)
 
         # Process each record in the array
         cleaned_records = []

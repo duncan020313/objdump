@@ -157,13 +157,14 @@ def _ensure_jackson_in_classpaths(root: ET._Element, jackson_version: str) -> bo
     return modified
 
 
-def _add_instrument_include_to_javac(root: ET._Element) -> bool:
+def _add_instrument_include_to_javac(root: ET._Element, properties: Dict[str, str]) -> bool:
     """
-    Adds <include name="org/instrument/**"/> to all javac tasks in compile targets
-    and adds nowarn="true" attribute.
+    Adds <include name="org/instrument/**"/> to all javac tasks in compile targets,
+    adds nowarn="true" attribute, and adds Jackson library pathelement entries to javac classpaths.
     
     Args:
         root: The XML root element.
+        properties: A dictionary of property names and values.
     
     Returns:
         True if any javac was modified, False otherwise.
@@ -175,12 +176,41 @@ def _add_instrument_include_to_javac(root: ET._Element) -> bool:
         target_name = target.get('name', '')
         if 'compile' in target_name.lower() and 'test' not in target_name.lower():
             # Find javac elements in this target
-            for javac in target.findall('.//javac'):
+            for javac in target.findall('javac'):
                 # Add nowarn="true" if not present
                 if 'nowarn' not in javac.attrib:
                     javac.set('nowarn', 'true')
                     modified = True
                     log.info(f"Added nowarn='true' to javac in target '{target_name}'")
+                
+                # Add Jackson pathelement entries to classpath
+                classpath = javac.find('classpath')
+                if classpath is None:
+                    # Create new classpath element
+                    classpath = ET.Element('classpath')
+                    classpath.text = '\n          '
+                    classpath.tail = '\n        '
+                    javac.insert(0, classpath)
+                    modified = True
+                    log.info(f"Created classpath in javac in target '{target_name}'")
+                
+                # Get existing pathelement locations
+                existing_locations = {pe.get('location') for pe in classpath.findall('pathelement')}
+                
+                # Jackson jars to add
+                jackson_jars = [
+                    '${jackson.core.jar}',
+                    '${jackson.databind.jar}',
+                    '${jackson.annotations.jar}'
+                ]
+                
+                # Add missing Jackson jars
+                for jar in jackson_jars:
+                    if jar not in existing_locations:
+                        el = ET.SubElement(classpath, 'pathelement', {'location': jar})
+                        el.tail = '\n          '
+                        modified = True
+                        log.info(f"Added {jar} to javac classpath in target '{target_name}'")
                 
                 # Check if org/instrument/** is already included
                 existing_includes = [inc.get('name', '') for inc in javac.findall('include')]
@@ -206,16 +236,47 @@ def _add_instrument_include_to_javac(root: ET._Element) -> bool:
                         
                         modified = True
                         log.info(f"Added org/instrument/** include to javac in target '{target_name}'")
+                        
+                
     
-    # Also add nowarn to compile.tests target
+    # Also add nowarn and Jackson to compile.tests target
     for target in root.findall('target'):
         target_name = target.get('name', '')
         if target_name == 'compile.tests':
-            for javac in target.findall('.//javac'):
+            for javac in target.findall('javac'):
                 if 'nowarn' not in javac.attrib:
                     javac.set('nowarn', 'true')
                     modified = True
                     log.info(f"Added nowarn='true' to javac in target '{target_name}'")
+                
+                # Add Jackson pathelement entries to classpath
+                classpath = javac.find('classpath')
+                if classpath is None:
+                    # Create new classpath element
+                    classpath = ET.Element('classpath')
+                    classpath.text = '\n          '
+                    classpath.tail = '\n        '
+                    javac.insert(0, classpath)
+                    modified = True
+                    log.info(f"Created classpath in javac in target '{target_name}'")
+                
+                # Get existing pathelement locations
+                existing_locations = {pe.get('location') for pe in classpath.findall('pathelement')}
+                
+                # Jackson jars to add
+                jackson_jars = [
+                    '${jackson.core.jar}',
+                    '${jackson.databind.jar}',
+                    '${jackson.annotations.jar}'
+                ]
+                
+                # Add missing Jackson jars
+                for jar in jackson_jars:
+                    if jar not in existing_locations:
+                        el = ET.SubElement(classpath, 'pathelement', {'location': jar})
+                        el.tail = '\n          '
+                        modified = True
+                        log.info(f"Added {jar} to javac classpath in target '{target_name}'")
     
     return modified
 
@@ -316,7 +377,11 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
         
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
-        modified3 = _add_instrument_include_to_javac(root)
+        prohibited = ["math", "jsoup", "compress"]
+        if not any(p in build_xml_path.lower() for p in prohibited):
+            modified3 = _add_instrument_include_to_javac(root, properties)
+        else:
+            modified3 = False
         modified4 = _add_jackson_to_path_filesets(root)
         
         return modified1 or modified2 or modified3 or modified4
@@ -339,37 +404,3 @@ def process_all_ant_files_in_dir(work_dir: str, jackson_version: str = "2.13.0",
                 build_file = os.path.join(root_dir, file)
                 log.info(f"Processing file: {build_file}")
                 add_jackson_to_build_file(build_file, jackson_version, class_dir)
-
-
-def verify_jackson_in_defects4j_shared_build(jackson_version: str = "2.13.0") -> None:
-    """
-    Verifies that Jackson dependencies are correctly configured in the Defects4J shared build file.
-    This function now focuses on verification rather than modification.
-    """
-    shared_build_file = "/defects4j/framework/projects/defects4j.build.xml"
-    if not os.path.exists(shared_build_file):
-        log.warning(f"Shared build file not found: {shared_build_file}")
-        return
-
-    try:
-        parser = ET.XMLParser(remove_blank_text=False, remove_comments=False)
-        tree = ET.parse(shared_build_file, parser)
-        root = tree.getroot()
-
-        # Check for existence of Jackson properties
-        expected_props = {'jackson.version', 'jackson.core.jar', 'jackson.databind.jar', 'jackson.annotations.jar'}
-        existing_props = {prop.get('name') for prop in root.findall('property')}
-        
-        if not expected_props.issubset(existing_props):
-            log.warning(f"Jackson properties are not fully configured in {shared_build_file}. Manual verification may be needed.")
-            return
-
-        # Check for existence of the Jackson library path
-        if not any(path.get('id') == 'd4j.lib.jackson' for path in root.findall('path')):
-            log.warning(f"Path 'd4j.lib.jackson' is not defined in {shared_build_file}. Manual verification may be needed.")
-            return
-        
-        log.info(f"Jackson dependencies appear to be correctly configured in {shared_build_file}.")
-
-    except Exception as e:
-        log.error(f"Error verifying shared build file: {e}")

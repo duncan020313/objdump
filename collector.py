@@ -71,12 +71,14 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
 
     # Target directory: <output_base>/<project_id>/<bug_id>/
     collection_dir = os.path.join(output_base, project_id, bug_id)
+    
+    if os.path.exists(collection_dir):
+        shutil.rmtree(collection_dir)
+        
+    os.makedirs(collection_dir, exist_ok=True)
+    log.debug(f"Created collection directory: {collection_dir}")
 
     try:
-        # Create target directory structure
-        os.makedirs(collection_dir, exist_ok=True)
-        log.debug(f"Created collection directory: {collection_dir}")
-
         # Create correct/ and wrong/ subdirectories if test results are available
         if test_results:
             correct_dir = os.path.join(collection_dir, "correct")
@@ -100,6 +102,10 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
     copied_files = []
     for filename in json_files:
         src_path = os.path.join(dumps_dir, filename)
+        
+        # Do not copy empty files
+        if os.path.getsize(src_path) == 0:
+            continue
 
         # Determine target directory based on test results
         if test_results:
@@ -133,6 +139,8 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
             log.error(f"Failed to copy {filename}: {e}")
             # Continue with other files even if one fails
 
+    log.info(f"Copied {len(copied_files)} files to {collection_dir}")
+
     # Also copy instrumented methods JSON file if it exists
     instrumented_methods_file = os.path.join(work_dir, "instrumented_methods.json")
     if os.path.exists(instrumented_methods_file):
@@ -150,52 +158,44 @@ def collect_dumps(work_dir: str, project_id: str, bug_id: str, output_base: str,
 
     log.info(f"Collected {len(copied_files)} files to {collection_dir}")
 
-    # Post-process the collected files to remove MAX_DEPTH_REACHED entries
-    try:
-        log.info("Post-processing collected files to remove MAX_DEPTH_REACHED entries...")
+    if test_results:
+        # Process both correct and wrong directories with unified schema generation
+        correct_dir = os.path.join(collection_dir, "correct")
+        wrong_dir = os.path.join(collection_dir, "wrong")
+        schemas_output_dir = os.path.join(collection_dir, "schemas")
 
-        if test_results:
-            # Process both correct and wrong directories with unified schema generation
-            correct_dir = os.path.join(collection_dir, "correct")
-            wrong_dir = os.path.join(collection_dir, "wrong")
-            schemas_output_dir = os.path.join(collection_dir, "schemas")
+        # Collect directories that exist
+        directories_to_process = []
+        if os.path.exists(correct_dir):
+            directories_to_process.append(correct_dir)
+        if os.path.exists(wrong_dir):
+            directories_to_process.append(wrong_dir)
 
-            # Collect directories that exist
-            directories_to_process = []
-            if os.path.exists(correct_dir):
-                directories_to_process.append(correct_dir)
-            if os.path.exists(wrong_dir):
-                directories_to_process.append(wrong_dir)
-
-            if directories_to_process:
-                log.info(f"Processing {len(directories_to_process)} directories for unified schema generation")
-                stats = process_multiple_directories_by_method(
-                    directories_to_process,
-                    schemas_output_dir,
-                    backup=True
-                )
-                log.info(f"Unified post-processing complete: {stats['json_files_processed']} JSON files, "
-                        f"{stats['total_lines_processed']} lines processed, "
-                        f"{stats['schemas_generated']} schemas generated")
-                if stats['errors'] > 0:
-                    log.warning(f"Post-processing had {stats['errors']} errors")
-            else:
-                log.warning("No correct/ or wrong/ directories found for schema generation")
-        else:
-            # Post-process root directory if no test results
-            stats = post_process_dump_files(collection_dir, backup=True)
-            log.info(f"Post-processing complete: {stats['json_files_processed']} JSON files, "
-                    f"{stats['total_lines_processed']} lines processed")
+        if directories_to_process:
+            log.info(f"Processing {len(directories_to_process)} directories for unified schema generation")
+            stats = process_multiple_directories_by_method(
+                directories_to_process,
+                schemas_output_dir,
+                backup=True
+            )
+            log.info(f"Unified post-processing complete: {stats['json_files_processed']} JSON files, "
+                    f"{stats['total_lines_processed']} lines processed, "
+                    f"{stats['schemas_generated']} schemas generated")
             if stats['errors'] > 0:
                 log.warning(f"Post-processing had {stats['errors']} errors")
+        else:
+            log.warning("No correct/ or wrong/ directories found for schema generation")
+    else:
+        # Post-process root directory if no test results
+        stats = post_process_dump_files(collection_dir, backup=True)
+        log.info(f"Post-processing complete: {stats['json_files_processed']} JSON files, "
+                f"{stats['total_lines_processed']} lines processed")
+        if stats['errors'] > 0:
+            log.warning(f"Post-processing had {stats['errors']} errors")
 
-        # Clean up: Remove all files and directories except correct/, wrong/, schemas/, and instrumented_methods.json
-        log.info("Cleaning up collection directory...")
-        _cleanup_collection_directory(collection_dir, test_results is not None)
-
-    except Exception as e:
-        log.error(f"Post-processing failed: {e}")
-        # Don't fail the collection process if post-processing fails
+    # Clean up: Remove all files and directories except correct/, wrong/, schemas/, and instrumented_methods.json
+    log.info("Cleaning up collection directory...")
+    _cleanup_collection_directory(collection_dir, test_results is not None)
 
     return collection_dir
 

@@ -131,8 +131,6 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
 
 def compile_project(work_dir: str) -> bool:
     """Compile the project and return success status."""
-
-
     # Ensure a default dump file exists for compile phase; actual dumps occur during test runs
     out_file = os.path.join(work_dir, "dump.json")
     env_vars = {"OBJDUMP_OUT": out_file}
@@ -287,11 +285,17 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     if modified_classes:
         log.info(f"Modified classes: {modified_classes}")
-        names = filter_tests_by_directory_proximity(modified_classes, names_raw)
-        log.info(f"Filtered relevant tests: {len(names)}")
     else:
         names = names_raw
         log.info("No modified classes found, using all relevant tests")
+        
+    if len(modified_classes) > 100:
+        names = filter_tests_by_directory_proximity(modified_classes, names_raw)
+        if not names:
+            names = names_raw
+        log.info(f"Filtered relevant tests: {len(names)}")
+    else:
+        names = names_raw
 
     trigger_set = set()
     if trigger_tests:
@@ -433,7 +437,7 @@ def run_all(project_id: str, bug_id: str, work_dir: str, jackson_version: str = 
 
 
     # Step 1: Checkout buggy and fixed versions
-    buggy_dir, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
+    _, fixed_dir = checkout_versions(project_id, bug_id, work_dir)
 
     # Step 2: Setup Jackson dependencies
     setup_jackson_dependencies(work_dir, jackson_version)

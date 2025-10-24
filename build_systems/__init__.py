@@ -1,12 +1,8 @@
 from pathlib import Path
 from typing import Optional, List
 import glob
-import os
-import xml.etree.ElementTree as ET
 import logging
 from jt_types import BuildSystem
-from .ant import add_jackson_to_build_file, verify_jackson_in_defects4j_shared_build, process_all_ant_files_in_dir
-from defects4j import get_project_build_file
 
 log = logging.getLogger(__name__)
 
