@@ -371,6 +371,9 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
         if "::" in test_name:
             # Already a specific method, use as-is
             return [test_name]
+        elif "$" in test_name:
+            # split by $ and take the first part
+            return [test_name.split("$")[0]]
 
         # This is a test class, try to expand it
         log.debug(f"Expanding test class: {test_name}")

@@ -86,10 +86,7 @@ public final class DebugDump {
     
     private static final ObjectMapper M = new ObjectMapper()
     .disable(MapperFeature.USE_ANNOTATIONS)
-    .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
-    .setVisibility(VisibilityChecker.Std.defaultInstance()
-      .withGetterVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE)
-      .withFieldVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY));
+    .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
     
     static {
         // Register the depth-limited serializer

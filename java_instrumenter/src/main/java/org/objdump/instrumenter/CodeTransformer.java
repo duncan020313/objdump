@@ -156,6 +156,11 @@ public class CodeTransformer {
             if (methodInfo.isConstructor) {
                 instrumentConstructor(methodInfo.constructorDeclaration);
             } else {
+                // Skip abstract methods or interface methods without body
+                if (shouldSkipMethod(methodInfo.methodDeclaration)) {
+                    System.err.println("Warning: Skipping abstract/interface method without body: " + methodInfo.signature);
+                    continue;
+                }
                 instrumentMethod(methodInfo.methodDeclaration);
             }
         }
@@ -191,6 +196,30 @@ public class CodeTransformer {
         if (!hasDebugDump) {
             cu.addImport("org.instrument.DebugDump");
         }
+    }
+
+    /**
+     * Check if a method should be skipped from instrumentation
+     * Skip abstract methods or interface methods without default/static modifiers
+     */
+    private static boolean shouldSkipMethod(MethodDeclaration method) {
+        // Skip if method has no body (abstract)
+        if (!method.getBody().isPresent()) {
+            return true;
+        }
+
+        // Check if method is in an interface
+        Optional<com.github.javaparser.ast.body.ClassOrInterfaceDeclaration> parentClass = 
+            method.findAncestor(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class);
+        
+        if (parentClass.isPresent() && parentClass.get().isInterface()) {
+            // Allow default and static methods in interfaces
+            if (!method.isDefault() && !method.isStatic()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

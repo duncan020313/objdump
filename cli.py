@@ -137,10 +137,18 @@ def main() -> None:
     p_classify.add_argument("--project", help="Single project ID (for backward compatibility)")
     p_classify.add_argument("--bug", help="Single bug ID (for backward compatibility)")
     p_classify.add_argument("--filter-functional", action="store_true", help="Filter functional bugs")
+    p_classify.add_argument("--filter-nl2", action="store_true", help="Filter nl2postcond bugs")
 
     p_merge = sub.add_parser("merge", help="Merge JSON/JSONL files from directory into single JSON file")
     p_merge.add_argument("target_dir", help="Directory to scan for JSON/JSONL files")
     p_merge.add_argument("--output", "-o", required=True, help="Output JSON file path")
+
+    p_check_dumps = sub.add_parser("check-dumps", help="Check dump collection status across bugs")
+    p_check_dumps.add_argument("dumps_dir", help="Base directory containing collected dumps")
+    p_check_dumps.add_argument("--projects", default=",".join(PROJECTS), help="Comma-separated list of projects")
+    p_check_dumps.add_argument("--output", help="Output CSV file path (required)")
+    p_check_dumps.add_argument("--output-md", help="Output markdown file path")
+    p_check_dumps.add_argument("--valid-bugs-csv", default="defects4j_valids.csv", help="CSV file containing valid bug IDs to check")
 
     args = parser.parse_args()
 
@@ -279,9 +287,16 @@ def main() -> None:
             # Use the classification module
             all_results = classification.classify_projects(PROJECTS, args.max_bugs_per_project, args.workers)
 
+        # Apply filters (can be combined for intersection)
+        original_count = len(all_results)
         if args.filter_functional:
             all_results = classification.filter_functional_bugs(all_results)
-            log.info(f"Filtered to {len(all_results)} functional bugs")
+            log.info(f"Filtered to {len(all_results)} functional bugs (from {original_count})")
+            original_count = len(all_results)
+        
+        if args.filter_nl2:
+            all_results = classification.filter_nl2postcond_bugs(all_results)
+            log.info(f"Filtered to {len(all_results)} nl2postcond bugs (from {original_count})")
 
         # Write outputs
         if args.output:
@@ -298,12 +313,60 @@ def main() -> None:
         try:
             stats = merger.merge_json_files(args.target_dir, args.output)
             log.info(f"Merge completed: {stats['json_count']} JSON files processed")
-            log.info(f"Output size: {stats['output_size']:,} bytes")
+            log.info(f"Output size: {stats['output_size'] / 1024 / 1024:.2f} MB")
             if stats['errors'] > 0:
                 log.warning(f"Errors encountered: {stats['errors']}")
         except Exception as e:
             log.error(f"Merge failed: {e}")
             sys.exit(1)
+
+    elif args.cmd == "check-dumps":
+        if not args.output:
+            log.error("Error: --output is required for check-dumps command")
+            sys.exit(1)
+
+        projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
+        if not projects:
+            projects = PROJECTS
+
+        # Load valid bugs from CSV
+        valid_bugs = load_valid_bugs(args.valid_bugs_csv)
+        if valid_bugs:
+            log.info(f"Loaded valid bugs from {args.valid_bugs_csv}")
+            total_valid = sum(len(bugs) for bugs in valid_bugs.values())
+            log.info(f"Total valid bugs to check: {total_valid}")
+        else:
+            log.warning(f"No valid bugs loaded from {args.valid_bugs_csv}, will scan dumps directory")
+
+        log.info(f"Scanning dumps directory: {args.dumps_dir}")
+        log.info(f"Projects: {', '.join(projects)}")
+
+        results = classification.scan_dumps_directory(args.dumps_dir, projects, valid_bugs)
+
+        if not results:
+            log.warning("No dump data found")
+            sys.exit(1)
+
+        # Write CSV output
+        classification.write_dump_status_csv(args.output, results)
+        log.info(f"CSV results saved to {args.output}")
+
+        # Write markdown output if requested
+        if args.output_md:
+            classification.write_dump_status_markdown(args.output_md, results)
+            log.info(f"Markdown results saved to {args.output_md}")
+
+        # Summary statistics
+        success_count = sum(1 for r in results if r.get("status") == "success")
+        no_failed_dumps_count = sum(1 for r in results if r.get("status") == "no_failed_dumps")
+        no_dumps_count = sum(1 for r in results if r.get("status") == "no_dumps")
+        not_found_count = sum(1 for r in results if r.get("status") == "not_found")
+        
+        log.info(f"Scanned {len(results)} bugs:")
+        log.info(f"  - Success: {success_count}")
+        log.info(f"  - No failed dumps: {no_failed_dumps_count}")
+        log.info(f"  - No dumps: {no_dumps_count}")
+        log.info(f"  - Not found: {not_found_count}")
 
 
 if __name__ == "__main__":

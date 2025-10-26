@@ -39,12 +39,11 @@ def setup_jackson_dependencies(workdir: str, jackson_version: str = "2.13.0") ->
     
     # Step 2: Add Jackson to maven-build.xml if it exists (Defects4J projects)
     # If workdir contains "jackson", then we'll skip it
-    if "jackson" not in workdir.lower():
-        log.info(f"Adding Jackson to maven-build.xml")
-        maven_build_xml = workdir_path / "maven-build.xml"
-        if maven_build_xml.is_file():
-            log.info(f"Adding Jackson to {maven_build_xml}")
-            add_jackson_to_maven_build_xml(str(maven_build_xml), jackson_version)
+    log.info(f"Adding Jackson to maven-build.xml")
+    maven_build_xml = workdir_path / "maven-build.xml"
+    if maven_build_xml.is_file():
+        log.info(f"Adding Jackson to {maven_build_xml}")
+        add_jackson_to_maven_build_xml(str(maven_build_xml), jackson_version)
         
     # Step 3: Download Jackson JARs using Maven
     log.info(f"Downloading Jackson JARs to {workdir}/lib")
@@ -147,8 +146,10 @@ def add_jackson_to_maven_build_xml(build_xml_path: str, jackson_version: str = "
         root.insert(insert_idx, prop_elem)
     
     ensure_property('jackson.version', jackson_version)
-    ensure_property('jackson.core.jar', f'lib/jackson-core-{jackson_version}.jar')
-    ensure_property('jackson.databind.jar', f'lib/jackson-databind-{jackson_version}.jar')
+    if "jacksoncore" not in build_xml_path.lower():
+        ensure_property('jackson.core.jar', f'lib/jackson-core-{jackson_version}.jar')
+    if "jacksondatabind" not in build_xml_path.lower():
+        ensure_property('jackson.databind.jar', f'lib/jackson-databind-{jackson_version}.jar')
     ensure_property('jackson.annotations.jar', f'lib/jackson-annotations-{jackson_version}.jar')
     ensure_property('instrument.src.dir', 'src/main/java/org/instrument')
     

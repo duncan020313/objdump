@@ -374,10 +374,12 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
             'jackson.annotations.jar': f"${{d4j.workdir}}/lib/jackson-annotations-{jackson_version}.jar",
             'instrument.src.dir': f'{class_dir}/org/instrument'
         }
+        if "jacksoncore" in build_xml_path.lower():
+            del properties['jackson.core.jar']
         
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
-        prohibited = ["math", "jsoup", "compress"]
+        prohibited = ["math", "jsoup", "compress", "mockito", "closure"]
         if not any(p in build_xml_path.lower() for p in prohibited):
             modified3 = _add_instrument_include_to_javac(root, properties)
         else:

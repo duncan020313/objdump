@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 import re
-
-
+import os
+import xml.etree.ElementTree as ET
 log = logging.getLogger(__name__)
 
 
@@ -41,8 +41,25 @@ def setup_jackson_dependencies(work_dir: str, jackson_version: str = "2.13.0") -
         log.warning("No Gradle build file found (build.gradle/build.gradle.kts); skipping")
 
     # Also update any .bnd files in the project to include org.instrument.*
+    if "mockito" in work_dir.lower():
+        log.info("Adding fileset to build.xml for Mockito")
+        add_fileset_to_build_xml(work_dir)
     update_bnd_files(work_dir)
 
+def add_fileset_to_build_xml(work_dir: str) -> None:
+    build_xml_path = Path(work_dir) / "build.xml"
+    if not build_xml_path.is_file():
+        return
+    text = build_xml_path.read_text(encoding="utf-8", errors="ignore")
+    root = ET.fromstring(text)
+    path = root.find("path[@id='compile.classpath']")
+    if path is None:
+        log.error("Could not find path in build.xml")
+        return
+    fileset = ET.SubElement(path, "fileset")
+    fileset.set("dir", "${lib.dir}")
+    fileset.set("includes", "jackson-*.jar")
+    build_xml_path.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
 
 def _ensure_gradle_dependencies_groovy(build_file_path: str, jackson_version: str) -> None:
     p = Path(build_file_path)
