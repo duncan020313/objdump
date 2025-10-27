@@ -35,7 +35,7 @@ def sanitize_field_name(field_name: str) -> str:
 def remove_max_depth_reached_recursive(data: Any) -> Any:
     """
     Recursively remove keys with MAX_DEPTH_REACHED values and their children.
-    Also removes empty arrays and objects.
+    Also removes empty arrays and objects, and SERIALIZATION_ERROR entries.
     Sanitizes field names to conform to Java identifier rules.
 
     Args:
@@ -51,15 +51,18 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         used_keys: Set[str] = set()
 
         for key, value in data.items():
-            # Skip keys that have MAX_DEPTH_REACHED as their value
+            # Skip keys that have MAX_DEPTH_REACHED or SERIALIZATION_ERROR as their value
             if value == "[MAX_DEPTH_REACHED]" or value == [] or value == {}:
+                continue
+            if isinstance(value, str) and value.startswith("[SERIALIZATION_ERROR:"):
                 continue
 
             # Recursively process the value
             cleaned_value = remove_max_depth_reached_recursive(value)
 
             # Only add the key if the cleaned value is not empty or None
-            if cleaned_value is not None and cleaned_value != "" and cleaned_value != "[MAX_DEPTH_REACHED]" and cleaned_value != [] and cleaned_value != {}:
+            is_error = isinstance(cleaned_value, str) and cleaned_value.startswith("[SERIALIZATION_ERROR:")
+            if cleaned_value is not None and cleaned_value != "" and cleaned_value != "[MAX_DEPTH_REACHED]" and cleaned_value != [] and cleaned_value != {} and not is_error:
                 # Sanitize the key
                 sanitized_key = sanitize_field_name(key)
 
@@ -84,7 +87,8 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         for item in data:
             cleaned_item = remove_max_depth_reached_recursive(item)
             # Only add non-empty items
-            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]" and cleaned_item != [] and cleaned_item != {}:
+            is_error = isinstance(cleaned_item, str) and cleaned_item.startswith("[SERIALIZATION_ERROR:")
+            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]" and cleaned_item != [] and cleaned_item != {} and not is_error:
                 cleaned.append(cleaned_item)
         return cleaned
     else:

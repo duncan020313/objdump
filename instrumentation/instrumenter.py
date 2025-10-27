@@ -27,7 +27,7 @@ def normalize_signature(signature: str) -> str:
     normalized = re.sub(r'\bfinal\s+', '', signature)
     normalized = re.sub(r'\n', '', normalized)
     normalized = re.sub(r'\s+', ' ', normalized)
-    normalized = re.sub(r'\(\s+)', '(', normalized)
+    normalized = re.sub(r'\(\s+', '(', normalized)
     normalized = re.sub(r'\s+\)', ')', normalized)
     normalized = re.sub(r"[^a-zA-Z0-9\s\(\),\<\>\{\}\[\]]", "", normalized)
     return normalized
