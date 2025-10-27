@@ -121,9 +121,9 @@ def _ensure_jackson_in_classpaths(root: ET._Element, jackson_version: str) -> bo
     
     # Jackson JARs to add
     jackson_jars = [
-        '${jackson.core.jar}',
-        '${jackson.databind.jar}',
-        '${jackson.annotations.jar}'
+        f'${{basedir}}/lib/jackson-core-{jackson_version}.jar',
+        f'${{basedir}}/lib/jackson-databind-{jackson_version}.jar',
+        f'${{basedir}}/lib/jackson-annotations-{jackson_version}.jar'
     ]
     
     # Find ALL classpath definitions (including nested ones)
@@ -379,7 +379,7 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
         
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
-        prohibited = ["math", "jsoup", "compress", "mockito", "closure"]
+        prohibited = ["math", "jsoup", "compress", "mockito", "closure", "time"]
         if not any(p in build_xml_path.lower() for p in prohibited):
             modified3 = _add_instrument_include_to_javac(root, properties)
         else:
