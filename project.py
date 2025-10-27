@@ -25,12 +25,15 @@ configure_logging()
 log = logging.getLogger(__name__)
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
-    lib_dir = os.path.join(work_dir, "lib")
     items = [
         (f"jackson-core-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-core/{version}/jackson-core-{version}.jar"),
         (f"jackson-databind-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-databind/{version}/jackson-databind-{version}.jar"),
         (f"jackson-annotations-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-annotations/{version}/jackson-annotations-{version}.jar"),
     ]
+    if "mockito" in work_dir.lower():
+        lib_dir = os.path.join(work_dir, "compileLib")
+        download_files(lib_dir, items)
+    lib_dir = os.path.join(work_dir, "lib")
     download_files(lib_dir, items)
 
 def extract_compilation_errors(work_dir: str) -> str:
@@ -208,44 +211,39 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
         rf.write(payload)
 
 
-def filter_tests_by_directory_proximity(modified_classes: List[str], test_names: List[str]) -> List[str]:
-    """Filter test names to only include those in the same package directory as modified source files.
+def filter_tests_by_directory_proximity(modified_classes: List[str], test_names: List[str], threshold: float = 0.0) -> List[str]:
+    """Filter test names by string similarity to modified source files.
 
     Args:
         modified_classes: List of modified source class names (e.g., ["org.apache.commons.math3.util.FastMath"])
         test_names: List of test class names (e.g., ["org.apache.commons.math3.util.ResizableDoubleArrayTest"])
+        split_point: Deprecated parameter, kept for backward compatibility
+        threshold: Minimum similarity threshold (0.0 to 1.0). Tests with similarity >= threshold are included.
 
     Returns:
-        List of filtered test names that match package directories of modified classes
+        List of filtered test names that have similarity >= threshold with at least one modified class
     """
+    from difflib import SequenceMatcher
+
     if not modified_classes or not test_names:
         return test_names
 
-    # Extract package paths from modified classes
-    modified_packages = set()
-    for class_name in modified_classes:
-        if '.' in class_name:
-            package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
-            modified_packages.add(package)
-
-    if not modified_packages:
-        return test_names
-
-    # Filter test names by package matching
     filtered_tests = []
     for test_name in test_names:
+        # Extract class name from test method if needed
         if '::' in test_name:
-            # Extract class name from test method (e.g., "Class::method" -> "Class")
-            class_name = test_name.split('::')[0]
+            test_class_name = test_name.split('::')[0]
         else:
-            class_name = test_name
+            test_class_name = test_name
 
-        if '.' in class_name:
-            test_package = class_name.rsplit('.', 1)[0]  # Remove class name, keep package
-            if test_package in modified_packages:
-                filtered_tests.append(test_name)
-        else:
-            # If no package info, include the test (fallback)
+        # Calculate max similarity with any modified class
+        max_similarity = 0.0
+        for modified_class in modified_classes:
+            similarity = SequenceMatcher(None, test_class_name, modified_class).ratio()
+            max_similarity = max(max_similarity, similarity)
+
+        # Include test if it meets the threshold
+        if max_similarity >= threshold:
             filtered_tests.append(test_name)
 
     return filtered_tests
@@ -288,9 +286,9 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     else:
         names = names_raw
         log.info("No modified classes found, using all relevant tests")
-        
-    if len(modified_classes) > 100:
-        names = filter_tests_by_directory_proximity(modified_classes, names_raw)
+
+    if len(names_raw) > 30:
+        names = filter_tests_by_directory_proximity(modified_classes, names_raw, threshold=0.85)
         if not names:
             names = names_raw
         log.info(f"Filtered relevant tests: {len(names)}")
@@ -346,7 +344,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         test_tasks.append((test_name, False))
 
     # Run tests in parallel
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(run_test_wrapper, task) for task in test_tasks]
         for future in as_completed(futures):
             future.result()  # Wait for completion and handle any exceptions
@@ -403,7 +401,7 @@ def expand_test_classes(work_dir: str, test_names: List[str], log) -> List[str]:
 
     # Use multithreading to expand test classes in parallel
     expanded_tests = []
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all test expansion tasks
         futures = [executor.submit(expand_single_test, test_name) for test_name in test_names]
 
