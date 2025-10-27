@@ -77,6 +77,7 @@ public final class DebugDump {
                         serializeWithDepth(fieldValue, gen, serializers, currentDepth + 1);
                     }
                 } catch (Exception e) {
+                    gen.writeFieldName("_error");
                     gen.writeString("[SERIALIZATION_ERROR: " + e.getMessage() + "]");
                 }
                 gen.writeEndObject();
