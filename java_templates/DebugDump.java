@@ -17,18 +17,18 @@ public final class DebugDump {
     // Custom serializer that limits depth to 3
     private static class DepthLimitedSerializer extends JsonSerializer<Object> {
         private static final int MAX_DEPTH = 5;
-        
+
         @Override
         public void serialize(Object value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             serializeWithDepth(value, gen, serializers, 0);
         }
-        
+
         private void serializeWithDepth(Object value, JsonGenerator gen, SerializerProvider serializers, int currentDepth) throws IOException {
             if (currentDepth >= MAX_DEPTH) {
                 gen.writeString("[MAX_DEPTH_REACHED]");
                 return;
             }
-            
+
             if (value == null) {
                 gen.writeNull();
             } else if (value instanceof String) {
@@ -83,11 +83,11 @@ public final class DebugDump {
             }
         }
     }
-    
+
     private static final ObjectMapper M = new ObjectMapper()
     .disable(MapperFeature.USE_ANNOTATIONS)
     .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
-    
+
     static {
         // Register the depth-limited serializer
         SimpleModule module = new SimpleModule();
@@ -98,8 +98,8 @@ public final class DebugDump {
 
   private DebugDump() {}
 
-  public static String newInvocationId() { 
-    return UUID.randomUUID().toString(); 
+  public static String newInvocationId() {
+    return UUID.randomUUID().toString();
   }
 
   public static void writeEntry(Object self, Map<String, Object> params, String id, String methodSig, String filePath) {
@@ -132,7 +132,7 @@ public final class DebugDump {
       if (outPath == null || outPath.isEmpty()) {
         outPath = "objdump.out";
       }
-      
+
       // Write all records as JSON array
       synchronized (lock) {
         FileWriter fw = null;
@@ -148,7 +148,7 @@ public final class DebugDump {
           try { if (fw != null) fw.close(); } catch (IOException ignored) { }
         }
       }
-    } catch (Exception e) { 
+    } catch (Exception e) {
         throw new RuntimeException(e);
     }
   }
