@@ -97,6 +97,52 @@ def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int
     return valid_bugs
 
 
+def load_failed_bugs(csv_path: str) -> Dict[str, Set[int]]:
+    """Load failed bug IDs from check-dumps CSV file.
+    
+    Failed bugs are those with status: no_dumps, not_found, or no_failed_dumps.
+
+    Returns:
+        Dictionary mapping project names to sets of failed bug IDs
+    """
+    log = logging.getLogger("load_failed_bugs")
+    failed_bugs = {}
+    failed_statuses = {"no_dumps", "not_found", "no_failed_dumps"}
+
+    if not os.path.exists(csv_path):
+        log.error(f"Error: {csv_path} not found")
+        return {}
+
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if not row.get('project') or not row.get('bug_id'):
+                    continue
+                    
+                status = row.get('status', '')
+                if status in failed_statuses:
+                    project = row['project']
+                    bug_id = int(row['bug_id'])
+
+                    if project not in failed_bugs:
+                        failed_bugs[project] = set()
+                    failed_bugs[project].add(bug_id)
+
+        log.info(f"Loaded failed bugs from {csv_path}:")
+        for project, bugs in failed_bugs.items():
+            log.info(f"  {project}: {len(bugs)} bugs")
+        
+        total_failed = sum(len(bugs) for bugs in failed_bugs.values())
+        log.info(f"Total failed bugs to retry: {total_failed}")
+
+    except Exception as e:
+        log.error(f"Error loading {csv_path}: {e}")
+        return {}
+
+    return failed_bugs
+
+
 
 
 def main() -> None:
@@ -121,6 +167,7 @@ def main() -> None:
     p_matrix.add_argument("--reports-basename", default="", help="Base name for report files; default uses timestamp")
     p_matrix.add_argument("--dumps-dir", default="/workspace/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
     p_matrix.add_argument("--valid-bugs-csv", default="defects4j_valids.csv", help="CSV file containing valid bug IDs")
+    p_matrix.add_argument("--retry-failed", default="", help="CSV file with check-dumps results; retry only failed bugs (no_dumps, not_found, no_failed_dumps)")
 
     p_postprocess = sub.add_parser("postprocess", help="Post-process dump files to remove MAX_DEPTH_REACHED entries")
     p_postprocess.add_argument("dump_dir", help="Directory containing dump files to process")
@@ -143,10 +190,10 @@ def main() -> None:
     p_merge.add_argument("--output", "-o", required=True, help="Output JSON file path")
 
     p_check_dumps = sub.add_parser("check-dumps", help="Check dump collection status across bugs")
-    p_check_dumps.add_argument("dumps_dir", help="Base directory containing collected dumps")
+    p_check_dumps.add_argument("--dumps_dir", default="/workspace/objdump_collected_dumps", help="Base directory containing collected dumps")
     p_check_dumps.add_argument("--projects", default=",".join(PROJECTS), help="Comma-separated list of projects")
-    p_check_dumps.add_argument("--output", help="Output CSV file path (required)")
-    p_check_dumps.add_argument("--output-md", help="Output markdown file path")
+    p_check_dumps.add_argument("--output", default="check_dumps.csv", help="Output CSV file path (required)")
+    p_check_dumps.add_argument("--output-md", default="check_dumps.md", help="Output markdown file path")
     p_check_dumps.add_argument("--valid-bugs-csv", default="defects4j_valids.csv", help="CSV file containing valid bug IDs to check")
 
     args = parser.parse_args()
@@ -169,8 +216,17 @@ def main() -> None:
 
         os.makedirs(args.reports_dir, exist_ok=True)
 
-        # Load valid bugs from CSV
-        valid_bugs = load_valid_bugs(args.valid_bugs_csv)
+        # Load bugs to process
+        if args.retry_failed:
+            # Load failed bugs from check-dumps CSV
+            bugs_to_process = load_failed_bugs(args.retry_failed)
+            if not bugs_to_process:
+                log.error("No failed bugs loaded. Exiting.")
+                sys.exit(1)
+            log.info("Running in retry-failed mode")
+        else:
+            # Load valid bugs from CSV
+            bugs_to_process = load_valid_bugs(args.valid_bugs_csv)
 
         # Set environment variable for centralized dumps directory
         os.environ["OBJDUMP_DUMPS_DIR"] = args.dumps_dir
@@ -183,13 +239,18 @@ def main() -> None:
         bug_tasks = []  # List of (project, bug_id) tuples
 
         for proj in projects:
-            # Use valid bugs if available, otherwise fall back to all bugs
-            if proj in valid_bugs:
-                ids = sorted(list(valid_bugs[proj]))
-                log.info(f"Using {len(ids)} valid bugs for {proj}")
+            # Use bugs_to_process if available, otherwise fall back to all bugs
+            if proj in bugs_to_process:
+                ids = sorted(list(bugs_to_process[proj]))
+                log.info(f"Using {len(ids)} bugs for {proj}")
             else:
-                ids = defects4j.list_bug_ids(proj)
-                log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
+                if args.retry_failed:
+                    # In retry mode, skip projects without failed bugs
+                    log.info(f"No failed bugs for {proj}, skipping")
+                    continue
+                else:
+                    ids = defects4j.list_bug_ids(proj)
+                    log.info(f"No valid bugs found for {proj}, using all {len(ids)} available bugs")
 
             if args.max_bugs_per_project > 0:
                 ids = ids[: args.max_bugs_per_project]
