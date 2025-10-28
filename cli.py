@@ -117,10 +117,10 @@ def main() -> None:
     p_matrix.add_argument("--max-bugs-per-project", type=int, default=0, help="0 means no cap")
     p_matrix.add_argument("--workers", type=int, default=4)
     p_matrix.add_argument("--jackson-version", dest="jackson_version", default="2.13.0")
-    p_matrix.add_argument("--work-base", default="/tmp/objdump-d4j")
+    p_matrix.add_argument("--work-base", default="/workspace/objdump-d4j")
     p_matrix.add_argument("--reports-dir", default="reports")
     p_matrix.add_argument("--reports-basename", default="", help="Base name for report files; default uses timestamp")
-    p_matrix.add_argument("--dumps-dir", default="/tmp/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
+    p_matrix.add_argument("--dumps-dir", default="/workspace/objdump_collected_dumps", help="Centralized directory for collecting all dump files")
     p_matrix.add_argument("--valid-bugs-csv", default="defects4j_valids.csv", help="CSV file containing valid bug IDs")
 
     p_postprocess = sub.add_parser("postprocess", help="Post-process dump files to remove MAX_DEPTH_REACHED entries")
@@ -293,7 +293,7 @@ def main() -> None:
             all_results = classification.filter_functional_bugs(all_results)
             log.info(f"Filtered to {len(all_results)} functional bugs (from {original_count})")
             original_count = len(all_results)
-        
+
         if args.filter_nl2:
             all_results = classification.filter_nl2postcond_bugs(all_results)
             log.info(f"Filtered to {len(all_results)} nl2postcond bugs (from {original_count})")
@@ -361,7 +361,7 @@ def main() -> None:
         no_failed_dumps_count = sum(1 for r in results if r.get("status") == "no_failed_dumps")
         no_dumps_count = sum(1 for r in results if r.get("status") == "no_dumps")
         not_found_count = sum(1 for r in results if r.get("status") == "not_found")
-        
+
         log.info(f"Scanned {len(results)} bugs:")
         log.info(f"  - Success: {success_count}")
         log.info(f"  - No failed dumps: {no_failed_dumps_count}")
