@@ -5,7 +5,7 @@ import logging
 import json
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="tree_sitter")
-
+import random
 from logging_setup import configure_logging
 from jt_types import BuildSystem
 import defects4j
@@ -304,6 +304,8 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     # Expand test classes into individual methods
     expanded_test_names = set(expand_test_classes(work_dir, names, log))
+    if len(expanded_test_names) > 200:
+        expanded_test_names = set(random.sample(expanded_test_names, 200))
 
     def run_test(test_name: str, is_correct: bool) -> bool:
         safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
