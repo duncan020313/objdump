@@ -332,6 +332,8 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     if len(correct_tests) > 200:
         correct_tests = set(random.sample(correct_tests, 200))
+    if len(trigger_set) > 200:
+        trigger_set = set(random.sample(trigger_set, 200))
 
     log.info(f"Correct tests (after filtering): {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
