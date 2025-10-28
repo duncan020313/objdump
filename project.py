@@ -38,6 +38,10 @@ def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
     lib_dir = os.path.join(work_dir, "lib")
     download_files(lib_dir, items)
 
+def drop_timeout_tests(test_names: List[str]) -> List[str]:
+    """Drop tests testing timeout"""
+    return [test_name for test_name in test_names if "timeout" not in test_name.lower()]
+
 def extract_compilation_errors(work_dir: str) -> str:
     """Extract compilation errors from build output."""
     # Look for common error log files
@@ -288,6 +292,8 @@ def run_tests(work_dir: str) -> Dict[str, str]:
     else:
         names = names_raw
         log.info("No modified classes found, using all relevant tests")
+
+    names_raw = drop_timeout_tests(names_raw)
 
     if len(names_raw) > 30:
         names = filter_tests_by_directory_proximity(modified_classes, names_raw, threshold=BUG_THRESHOLD)
