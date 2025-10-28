@@ -379,7 +379,7 @@ def add_jackson_to_build_file(build_xml_path: str, jackson_version: str = "2.13.
 
         modified1 = _ensure_properties(root, properties)
         modified2 = _ensure_jackson_in_classpaths(root, jackson_version)
-        prohibited = ["math", "jsoup", "compress", "mockito", "closure", "time", "cli", "lang", "codec"]
+        prohibited = ["math", "jsoup", "compress", "mockito", "closure", "time", "cli", "lang", "codec", "csv", "gson"]
         if not any(p in build_xml_path.lower() for p in prohibited):
             modified3 = _add_instrument_include_to_javac(root, properties)
         else:
