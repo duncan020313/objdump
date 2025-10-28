@@ -107,7 +107,6 @@ def main() -> None:
     p_all = sub.add_parser("all", help="Run full workflow: checkout, inject, instrument, tests")
     p_all.add_argument("project_id")
     p_all.add_argument("bug_id")
-    p_all.add_argument("work_dir")
     p_all.add_argument("--jackson-version", dest="jackson_version", default="2.13.0")
     p_all.add_argument("--instrument-all-modified", action="store_true")
     p_all.add_argument("--report-file", dest="report_file")
@@ -161,7 +160,8 @@ def main() -> None:
 
 
     if args.cmd == "all":
-        run_all(args.project_id, args.bug_id, args.work_dir, args.jackson_version, args.report_file)
+        work_dir = f"/workspace/objdump-all/{args.project_id}-{args.bug_id}"
+        run_all(args.project_id, args.bug_id, work_dir, args.jackson_version, args.report_file)
     elif args.cmd == "matrix":
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         if not projects:
