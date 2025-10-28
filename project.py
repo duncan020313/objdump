@@ -24,6 +24,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 configure_logging()
 log = logging.getLogger(__name__)
 
+BUG_THRESHOLD = 0.9
+
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
     items = [
         (f"jackson-core-{version}.jar", f"https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-core/{version}/jackson-core-{version}.jar"),
@@ -288,7 +290,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         log.info("No modified classes found, using all relevant tests")
 
     if len(names_raw) > 30:
-        names = filter_tests_by_directory_proximity(modified_classes, names_raw, threshold=0.85)
+        names = filter_tests_by_directory_proximity(modified_classes, names_raw, threshold=BUG_THRESHOLD)
         if not names:
             names = names_raw
         log.info(f"Filtered relevant tests: {len(names)}")
