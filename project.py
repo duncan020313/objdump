@@ -436,7 +436,7 @@ def collect_dump_files(work_dir: str, project_id: str, bug_id: str, test_results
 
 
     # Use centralized location from environment variable or default
-    output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
+    output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/workspace/objdump_collected_dumps")
     collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base, test_results)
     if collection_dir:
         log.info(f"Collected dump files to: {collection_dir}")
@@ -568,7 +568,7 @@ def run_all_staged(project_id: str, bug_id: str, work_dir: str, jackson_version:
     # Step 7: Collect dump files after test execution
     try:
         # Use centralized location from environment variable or default
-        output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/tmp/objdump_collected_dumps")
+        output_base = os.environ.get("OBJDUMP_DUMPS_DIR", "/workspace/objdump_collected_dumps")
         collection_dir = collect_dumps_safe(work_dir, project_id, bug_id, output_base, test_results)
         if collection_dir:
             status["stages"]["collect_dumps"] = {"status": "ok", "collection_dir": collection_dir}

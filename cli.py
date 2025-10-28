@@ -201,15 +201,17 @@ def main() -> None:
     configure_logging(debug=args.debug)
     log = logging.getLogger("cli")
 
-    if not build_java_instrumenter():
-        log.error("Failed to build Java instrumenter. Exiting.")
-        sys.exit(1)
-
 
     if args.cmd == "all":
+        if not build_java_instrumenter():
+            log.error("Failed to build Java instrumenter. Exiting.")
+            sys.exit(1)
         work_dir = f"/workspace/objdump-all/{args.project_id}-{args.bug_id}"
         run_all(args.project_id, args.bug_id, work_dir, args.jackson_version, args.report_file)
     elif args.cmd == "matrix":
+        if not build_java_instrumenter():
+            log.error("Failed to build Java instrumenter. Exiting.")
+            sys.exit(1)
         projects: List[str] = [p.strip() for p in args.projects.split(",") if p.strip()]
         if not projects:
             projects = PROJECTS
@@ -314,7 +316,6 @@ def main() -> None:
         write_detailed_errors(errors_path, results, args.dumps_dir)
 
     elif args.cmd == "postprocess":
-
         if not os.path.exists(args.dump_dir):
             log.error(f"Error: Directory {args.dump_dir} does not exist")
             return

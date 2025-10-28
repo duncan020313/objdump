@@ -4,7 +4,7 @@ import glob
 from datetime import datetime
 
 
-def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> Dict[str, Any]:
+def check_dump_collection_status(project_id: str, bug_id: str, dumps_base_dir: str = "/workspace/objdump_collected_dumps") -> Dict[str, Any]:
     """
     Check if dump files were collected for a specific project/bug.
 
@@ -86,7 +86,7 @@ def _stage_cell(stages: Dict[str, Any], key: str) -> str:
     return "–"
 
 
-def _dump_collection_cell(project_id: str, bug_id: str, dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> str:
+def _dump_collection_cell(project_id: str, bug_id: str, dumps_base_dir: str = "/workspace/objdump_collected_dumps") -> str:
     """Get dump collection status cell for markdown table."""
     # Ensure bug_id is a string for os.path.join
     bug_id_str = str(bug_id)
@@ -104,7 +104,7 @@ def _dump_collection_cell(project_id: str, bug_id: str, dumps_base_dir: str = "/
         return "❌"
 
 
-def write_markdown_table(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
+def write_markdown_table(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/workspace/objdump_collected_dumps") -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
         "| Project | Bug | Checkout | Jackson | Compile | Instrument | Rebuild | Tests | Dumps |\n"
@@ -125,7 +125,7 @@ def write_markdown_table(path: str, rows: List[Dict[str, Any]], dumps_base_dir: 
         f.writelines(lines)
 
 
-def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
+def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/workspace/objdump_collected_dumps") -> None:
     """Write summary statistics report to file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -269,7 +269,7 @@ def write_summary_statistics(path: str, rows: List[Dict[str, Any]], dumps_base_d
         f.write(f"\n**Overall Success Rate:** {overall_success_rate:.1f}% ({total_success}/{total_bugs})\n")
 
 
-def write_detailed_errors(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/tmp/objdump_collected_dumps") -> None:
+def write_detailed_errors(path: str, rows: List[Dict[str, Any]], dumps_base_dir: str = "/workspace/objdump_collected_dumps") -> None:
     """Write detailed error report to file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
