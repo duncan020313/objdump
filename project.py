@@ -304,8 +304,6 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     # Expand test classes into individual methods
     expanded_test_names = set(expand_test_classes(work_dir, names, log))
-    if len(expanded_test_names) > 200:
-        expanded_test_names = set(random.sample(expanded_test_names, 200))
 
     def run_test(test_name: str, is_correct: bool) -> bool:
         safe = re.sub(r"[^A-Za-z0-9]", "-", test_name)
@@ -331,6 +329,9 @@ def run_tests(work_dir: str) -> Dict[str, str]:
             return True
 
     correct_tests = expanded_test_names - trigger_set
+
+    if len(correct_tests) > 200:
+        correct_tests = set(random.sample(correct_tests, 200))
 
     log.info(f"Correct tests (after filtering): {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
