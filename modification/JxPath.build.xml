@@ -39,6 +39,9 @@ of the checked-out project version.
             <include name="*.jar"/>
             <exclude name="ant-*.jar"/>
         </fileset>
+        <fileset dir="${basedir}/lib">
+            <include name="jackson-*.jar"/>
+        </fileset>
     </path>
     <path id="test.classpath">
         <path refid="compile.classpath"/>

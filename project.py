@@ -318,7 +318,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         per_test_env = {"OBJDUMP_OUT": abs_dump_path}
 
         # Run the test and check the result
-        test_result = defects4j.test(work_dir, [test_name], env=per_test_env, timeout=60)
+        test_result = defects4j.test(work_dir, [test_name], env=per_test_env, timeout=120)
 
         # Handle different test results
         if test_result == "timeout":

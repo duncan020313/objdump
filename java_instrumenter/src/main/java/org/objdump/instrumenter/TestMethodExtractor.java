@@ -24,10 +24,10 @@ import java.util.Set;
  * Supports both JUnit 4 (@Test annotation) and JUnit 3 (public void test* methods).
  */
 public class TestMethodExtractor {
-    
+
     /**
      * Extract test method names from a Java test class file.
-     * 
+     *
      * @param javaFilePath Path to the Java test class file
      * @return List of test method names
      * @throws IOException If file cannot be read or parsed
@@ -36,10 +36,10 @@ public class TestMethodExtractor {
         Set<String> visitedClasses = new HashSet<>();
         return extractTestMethodsRecursive(javaFilePath, visitedClasses);
     }
-    
+
     /**
      * Recursively extract test method names from a Java test class file and its parent classes.
-     * 
+     *
      * @param javaFilePath Path to the Java test class file
      * @param visitedClasses Set to track visited classes and prevent infinite loops
      * @return List of test method names from current class and all parent classes
@@ -48,14 +48,14 @@ public class TestMethodExtractor {
     private static List<String> extractTestMethodsRecursive(String javaFilePath, Set<String> visitedClasses) throws IOException {
         JavaParser parser = new JavaParser();
         ParseResult<CompilationUnit> parseResult = parser.parse(new File(javaFilePath));
-        
+
         if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
             throw new IOException("Failed to parse Java file: " + javaFilePath);
         }
-        
+
         CompilationUnit cu = parseResult.getResult().get();
         List<String> testMethods = new ArrayList<>();
-        
+
         // Get the current class name to avoid infinite loops
         String currentClassName = getCurrentClassName(cu);
         if (currentClassName != null && visitedClasses.contains(currentClassName)) {
@@ -64,14 +64,14 @@ public class TestMethodExtractor {
         if (currentClassName != null) {
             visitedClasses.add(currentClassName);
         }
-        
+
         // Find all concrete test methods in the current class
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             if (isTestMethod(method)) {
                 testMethods.add(method.getName().asString());
             }
         });
-        
+
         // Only recurse to parent if current class has NO test methods
         if (testMethods.isEmpty()) {
             // Find parent class and recursively extract test methods
@@ -86,10 +86,10 @@ public class TestMethodExtractor {
                 }
             }
         }
-        
+
         return testMethods;
     }
-    
+
     /**
      * Check if a method is a test method.
      * Supports both JUnit 4 (@Test annotation) and JUnit 3 (public void test* methods).
@@ -100,29 +100,25 @@ public class TestMethodExtractor {
         if (method.isAbstract()) {
             return false;
         }
-        
-        // Check for JUnit 4 @Test annotation
+
+        // Check for JUnit @Test annotation (supports qualified names like org.junit.Test)
         if (method.getAnnotations() != null) {
             for (AnnotationExpr annotation : method.getAnnotations()) {
-                if (annotation.getName() instanceof Name) {
-                    Name name = (Name) annotation.getName();
-                    if ("Test".equals(name.asString())) {
-                        return true;
-                    }
+                String annName = annotation.getName().asString();
+                if ("Test".equals(annName) || annName.endsWith(".Test")) {
+                    return true;
                 }
             }
         }
-        
-        // Check for JUnit 3 style test methods (public void test*)
-        if (method.isPublic() && 
-            method.getType().isVoidType() && 
-            method.getName().asString().startsWith("test")) {
+
+        // Check for test-named methods (test*) regardless of modifiers/return type
+        if (method.getName().asString().startsWith("test")) {
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Get the current class name from the compilation unit.
      */
@@ -131,10 +127,10 @@ public class TestMethodExtractor {
                 .map(ClassOrInterfaceDeclaration::getNameAsString)
                 .orElse(null);
     }
-    
+
     /**
      * Resolve the parent class file path from the current class.
-     * 
+     *
      * @param cu Current compilation unit
      * @param currentFilePath Path to the current class file
      * @return Path to the parent class file, or null if no parent or cannot resolve
@@ -145,18 +141,18 @@ public class TestMethodExtractor {
         if (!classDecl.isPresent()) {
             return null;
         }
-        
+
         ClassOrInterfaceDeclaration classDeclaration = classDecl.get();
-        
+
         // Check if class extends another class
         if (classDeclaration.getExtendedTypes().isEmpty()) {
             return null; // No parent class
         }
-        
+
         // Get the first extended type (parent class)
         ClassOrInterfaceType parentType = classDeclaration.getExtendedTypes().get(0);
         String parentClassName = parentType.getNameAsString();
-        
+
         // Check if parent class has a fully qualified name (contains package)
         String parentPackageName = "";
         if (parentType.getScope().isPresent()) {
@@ -177,14 +173,14 @@ public class TestMethodExtractor {
                 }
             }
         }
-        
+
         // Convert package name to directory path
         String packagePath = parentPackageName.replace('.', '/');
-        
+
         // Get the directory of the current file
         Path currentPath = Paths.get(currentFilePath);
         Path currentDir = currentPath.getParent();
-        
+
         // Find the source root by looking for the package directory
         // Walk up the directory tree to find where the package structure starts
         Path searchDir = currentDir;
@@ -199,19 +195,19 @@ public class TestMethodExtractor {
             }
             searchDir = searchDir.getParent();
         }
-        
+
         // Fallback: try in the same directory as current file
         Path parentPath = currentDir.resolve(parentClassName + ".java");
         if (parentPath.toFile().exists()) {
             return parentPath.toString();
         }
-        
+
         return null;
     }
-    
+
     /**
      * Resolve the package name of a parent class from import statements.
-     * 
+     *
      * @param cu Compilation unit
      * @param parentClassName Name of the parent class
      * @return Package name if found in imports, empty string otherwise

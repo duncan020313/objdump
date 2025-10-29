@@ -12,6 +12,11 @@ configure_logging()
 log = logging.getLogger("post_process_dump_files")
 
 
+MAX_DEPTH_MARKER = "[MAX_DEPTH_REACHED]"
+CYCLE_MARKER = "[CYCLE_DETECTED]"
+SER_ERROR_PREFIX = "[SERIALIZATION_ERROR:"
+
+
 def sanitize_field_name(field_name: str) -> str:
     """
     Sanitize field name to conform to Java identifier rules: [a-zA-Z_][a-zA-Z0-9_]*
@@ -34,7 +39,7 @@ def sanitize_field_name(field_name: str) -> str:
 
 def remove_max_depth_reached_recursive(data: Any) -> Any:
     """
-    Recursively remove keys with MAX_DEPTH_REACHED values and their children.
+    Recursively remove keys with MAX_DEPTH_REACHED or CYCLE_DETECTED values and their children.
     Also removes empty arrays and objects, and SERIALIZATION_ERROR entries.
     Sanitizes field names to conform to Java identifier rules.
 
@@ -52,17 +57,25 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
 
         for key, value in data.items():
             # Skip keys that have MAX_DEPTH_REACHED or SERIALIZATION_ERROR as their value
-            if value == "[MAX_DEPTH_REACHED]" or value == [] or value == {}:
+            if value == MAX_DEPTH_MARKER or value == CYCLE_MARKER or value == [] or value == {}:
                 continue
-            if isinstance(value, str) and value.startswith("[SERIALIZATION_ERROR:"):
+            if isinstance(value, str) and value.startswith(SER_ERROR_PREFIX):
                 continue
 
             # Recursively process the value
             cleaned_value = remove_max_depth_reached_recursive(value)
 
             # Only add the key if the cleaned value is not empty or None
-            is_error = isinstance(cleaned_value, str) and cleaned_value.startswith("[SERIALIZATION_ERROR:")
-            if cleaned_value is not None and cleaned_value != "" and cleaned_value != "[MAX_DEPTH_REACHED]" and cleaned_value != [] and cleaned_value != {} and not is_error:
+            is_error = isinstance(cleaned_value, str) and cleaned_value.startswith(SER_ERROR_PREFIX)
+            if (
+                cleaned_value is not None
+                and cleaned_value != ""
+                and cleaned_value != MAX_DEPTH_MARKER
+                and cleaned_value != CYCLE_MARKER
+                and cleaned_value != []
+                and cleaned_value != {}
+                and not is_error
+            ):
                 # Sanitize the key
                 sanitized_key = sanitize_field_name(key)
 
@@ -87,8 +100,16 @@ def remove_max_depth_reached_recursive(data: Any) -> Any:
         for item in data:
             cleaned_item = remove_max_depth_reached_recursive(item)
             # Only add non-empty items
-            is_error = isinstance(cleaned_item, str) and cleaned_item.startswith("[SERIALIZATION_ERROR:")
-            if cleaned_item is not None and cleaned_item != "" and cleaned_item != "[MAX_DEPTH_REACHED]" and cleaned_item != [] and cleaned_item != {} and not is_error:
+            is_error = isinstance(cleaned_item, str) and cleaned_item.startswith(SER_ERROR_PREFIX)
+            if (
+                cleaned_item is not None
+                and cleaned_item != ""
+                and cleaned_item != MAX_DEPTH_MARKER
+                and cleaned_item != CYCLE_MARKER
+                and cleaned_item != []
+                and cleaned_item != {}
+                and not is_error
+            ):
                 cleaned.append(cleaned_item)
         return cleaned
     else:
@@ -159,7 +180,7 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
         cleaned_records = []
         for data in data_array:
             try:
-                # Remove MAX_DEPTH_REACHED entries
+                # Remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries
                 cleaned_data = remove_max_depth_reached_recursive(data)
 
                 # Extract method metadata
@@ -295,7 +316,7 @@ def process_multiple_directories_by_method(
             cleaned_records = []
             for data in data_array:
                 try:
-                    # Remove MAX_DEPTH_REACHED entries
+                    # Remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries
                     cleaned_data = remove_max_depth_reached_recursive(data)
 
                     # Extract method metadata
@@ -369,7 +390,7 @@ def process_multiple_directories_by_method(
 
 def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> int:
     """
-    Process a JSON file to remove MAX_DEPTH_REACHED entries.
+    Process a JSON file to remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries.
 
     Args:
         input_path: Path to input JSON file
@@ -393,7 +414,7 @@ def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = 
         cleaned_records = []
         for data in data_array:
             try:
-                # Remove MAX_DEPTH_REACHED entries
+                # Remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries
                 cleaned_data = remove_max_depth_reached_recursive(data)
                 cleaned_records.append(cleaned_data)
                 processed_count += 1
@@ -437,7 +458,7 @@ def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = 
 
 def process_single_json_file(input_path: str, output_path: str, *, emit_schema: bool = True) -> bool:
     """
-    Process a single JSON file to remove MAX_DEPTH_REACHED entries.
+    Process a single JSON file to remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries.
 
     Args:
         input_path: Path to input JSON file
@@ -450,7 +471,7 @@ def process_single_json_file(input_path: str, output_path: str, *, emit_schema: 
         with open(input_path, 'r', encoding='utf-8') as infile:
             data = json.load(infile)
 
-        # Remove MAX_DEPTH_REACHED entries
+        # Remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries
         cleaned_data = remove_max_depth_reached_recursive(data)
 
         # Write cleaned data
@@ -481,7 +502,7 @@ def process_single_json_file(input_path: str, output_path: str, *, emit_schema: 
 
 def post_process_dump_files(dump_dir: str, backup: bool = True, *, emit_schema: bool = True) -> Dict[str, int]:
     """
-    Post-process all JSON files in a directory to remove MAX_DEPTH_REACHED entries.
+    Post-process all JSON files in a directory to remove MAX_DEPTH_REACHED and CYCLE_DETECTED entries.
     Uses method-level schema generation when emit_schema is True.
 
     Args:
