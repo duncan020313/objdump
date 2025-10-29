@@ -6,4 +6,5 @@ for d in /defects4j/framework/projects/*/lib/; do cp .cache/jars/*.jar "$d"; don
 test $(ls -l /defects4j/framework/projects/*/lib/jackson-*.jar | wc -l) -eq 45 || { echo "Expected 45 Jackson JAR files, but found $(ls -l /defects4j/framework/projects/*/lib/jackson-*.jar | wc -l)"; exit 1; }
 cp modification/dj4-test /defects4j/framework/bin/d4j/d4j-test
 cp modification/Collections.build.xml /defects4j/framework/projects/Collections/Collections.build.xml
+cp modification/JxPath.build.xml /defects4j/framework/projects/JxPath/JxPath.build.xml
 ```

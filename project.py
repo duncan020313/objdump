@@ -318,7 +318,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         per_test_env = {"OBJDUMP_OUT": abs_dump_path}
 
         # Run the test and check the result
-        test_result = defects4j.test(work_dir, [test_name], env=per_test_env, timeout=10)
+        test_result = defects4j.test(work_dir, [test_name], env=per_test_env, timeout=60)
 
         # Handle different test results
         if test_result == "timeout":
@@ -357,7 +357,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         test_tasks.append((test_name, False))
 
     # Run tests in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=64) as executor:
         futures = [executor.submit(run_test_wrapper, task) for task in test_tasks]
         for future in as_completed(futures):
             future.result()  # Wait for completion and handle any exceptions
