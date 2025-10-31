@@ -17,6 +17,34 @@ CYCLE_MARKER = "[CYCLE_DETECTED]"
 SER_ERROR_PREFIX = "[SERIALIZATION_ERROR:"
 
 
+def _is_special_numeric_string(value: Any) -> bool:
+    """Return True if value is a string representing NaN or (±)Infinity.
+
+    This aligns with Java's Double/Float string forms: "NaN", "Infinity", "-Infinity".
+    Case-insensitive matching is also supported.
+    """
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    lower = v.lower()
+    return lower in {"nan", "infinity", "+infinity", "-infinity"}
+
+
+def _convert_special_numeric_strings_to_int(data: Any) -> Any:
+    """Recursively convert special numeric strings (NaN/Infinity) to int for schema inference.
+
+    We keep original cleaned JSON unchanged; this is only for feeding SchemaBuilder
+    so fields don't become union of integer|string when special values appear.
+    """
+    if _is_special_numeric_string(data):
+        return 0
+    if isinstance(data, list):
+        return [_convert_special_numeric_strings_to_int(item) for item in data]
+    if isinstance(data, dict):
+        return {k: _convert_special_numeric_strings_to_int(v) for k, v in data.items()}
+    return data
+
+
 def sanitize_field_name(field_name: str) -> str:
     """
     Sanitize field name to conform to Java identifier rules: [a-zA-Z_][a-zA-Z0-9_]*
@@ -237,7 +265,7 @@ def process_dump_directory_by_method(dump_dir: str, backup: bool = True) -> Dict
                 if phase in phase_records and phase_records[phase]:
                     builder = SchemaBuilder()
                     for record in phase_records[phase]:
-                        builder.add_object(record)
+                        builder.add_object(_convert_special_numeric_strings_to_int(record))
 
                     schema_obj = builder.to_schema()
                     schema_path = os.path.join(method_dir, f"{phase}.schema.json")
@@ -372,7 +400,7 @@ def process_multiple_directories_by_method(
                 if phase in phase_records and phase_records[phase]:
                     builder = SchemaBuilder()
                     for record in phase_records[phase]:
-                        builder.add_object(record)
+                        builder.add_object(_convert_special_numeric_strings_to_int(record))
 
                     schema_obj = builder.to_schema()
                     schema_path = os.path.join(method_dir, f"{phase}.schema.json")
@@ -429,7 +457,7 @@ def process_json_file(input_path: str, output_path: str, *, emit_schema: bool = 
                         builder = builders.get(phase)
                         if builder is not None:
                             # genson accepts dicts directly
-                            builder.add_object(cleaned_data)
+                            builder.add_object(_convert_special_numeric_strings_to_int(cleaned_data))
 
             except Exception as e:
                 # Skip records that cause errors
@@ -483,9 +511,9 @@ def process_single_json_file(input_path: str, output_path: str, *, emit_schema: 
             builder = SchemaBuilder()
             if isinstance(cleaned_data, list):
                 for item in cleaned_data:
-                    builder.add_object(item)
+                    builder.add_object(_convert_special_numeric_strings_to_int(item))
             else:
-                builder.add_object(cleaned_data)
+                builder.add_object(_convert_special_numeric_strings_to_int(cleaned_data))
             schema_obj = builder.to_schema()
             schema_path = f"{output_path}.schema.json"
             _write_schema_file(schema_path, schema_obj)

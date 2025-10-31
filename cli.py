@@ -99,7 +99,7 @@ def load_valid_bugs(csv_path: str = "defects4j_valids.csv") -> Dict[str, Set[int
 
 def load_failed_bugs(csv_path: str) -> Dict[str, Set[int]]:
     """Load failed bug IDs from check-dumps CSV file.
-    
+
     Failed bugs are those with status: no_dumps, not_found, or no_failed_dumps.
 
     Returns:
@@ -119,7 +119,7 @@ def load_failed_bugs(csv_path: str) -> Dict[str, Set[int]]:
             for row in reader:
                 if not row.get('project') or not row.get('bug_id'):
                     continue
-                    
+
                 status = row.get('status', '')
                 if status in failed_statuses:
                     project = row['project']
@@ -132,7 +132,7 @@ def load_failed_bugs(csv_path: str) -> Dict[str, Set[int]]:
         log.info(f"Loaded failed bugs from {csv_path}:")
         for project, bugs in failed_bugs.items():
             log.info(f"  {project}: {len(bugs)} bugs")
-        
+
         total_failed = sum(len(bugs) for bugs in failed_bugs.values())
         log.info(f"Total failed bugs to retry: {total_failed}")
 
@@ -186,7 +186,7 @@ def main() -> None:
     p_classify.add_argument("--filter-nl2", action="store_true", help="Filter nl2postcond bugs")
 
     p_merge = sub.add_parser("merge", help="Merge JSON/JSONL files from directory into single JSON file")
-    p_merge.add_argument("target_dir", help="Directory to scan for JSON/JSONL files")
+    p_merge.add_argument("--target_dir", default="/workspace/objdump_collected_dumps", help="Directory to scan for JSON/JSONL files")
     p_merge.add_argument("--output", "-o", required=True, help="Output JSON file path")
 
     p_check_dumps = sub.add_parser("check-dumps", help="Check dump collection status across bugs")

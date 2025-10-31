@@ -47,11 +47,25 @@ public final class DebugDump {
                 if (value instanceof String) {
                     gen.writeString((String) value);
                 } else if (value instanceof Number) {
-                    // Check for NaN and Infinity, convert to null
-                    if (value instanceof Double && (Double.isNaN((Double) value) || Double.isInfinite((Double) value))) {
-                        gen.writeNull();
-                    } else if (value instanceof Float && (Float.isNaN((Float) value) || Float.isInfinite((Float) value))) {
-                        gen.writeNull();
+                    // Preserve special floating values as strings
+                    if (value instanceof Double) {
+                        Double d = (Double) value;
+                        if (Double.isNaN(d)) {
+                            gen.writeString("NaN");
+                        } else if (Double.isInfinite(d)) {
+                            gen.writeString(d > 0 ? "Infinity" : "-Infinity");
+                        } else {
+                            gen.writeNumber(value.toString());
+                        }
+                    } else if (value instanceof Float) {
+                        Float f = (Float) value;
+                        if (Float.isNaN(f)) {
+                            gen.writeString("NaN");
+                        } else if (Float.isInfinite(f)) {
+                            gen.writeString(f > 0 ? "Infinity" : "-Infinity");
+                        } else {
+                            gen.writeNumber(value.toString());
+                        }
                     } else {
                         gen.writeNumber(value.toString());
                     }
@@ -242,11 +256,23 @@ public final class DebugDump {
   private static Object normalizePrimitive(Object value) {
     if (value instanceof Double) {
       Double d = (Double) value;
-      return (d.isNaN() || d.isInfinite()) ? null : d;
+      if (Double.isNaN(d)) {
+        return "NaN";
+      }
+      if (Double.isInfinite(d)) {
+        return d > 0 ? "Infinity" : "-Infinity";
+      }
+      return d;
     }
     if (value instanceof Float) {
       Float f = (Float) value;
-      return (f.isNaN() || f.isInfinite()) ? null : f;
+      if (Float.isNaN(f)) {
+        return "NaN";
+      }
+      if (Float.isInfinite(f)) {
+        return f > 0 ? "Infinity" : "-Infinity";
+      }
+      return f;
     }
     if (value instanceof Enum<?>) {
       return ((Enum<?>) value).name();
