@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 configure_logging()
 log = logging.getLogger(__name__)
 
-BUG_THRESHOLD = 0.9
+BUG_THRESHOLD = 0.8
 
 def download_jackson_jars(work_dir: str, version: str = "2.13.0") -> None:
     items = [
@@ -192,7 +192,8 @@ def generate_instrumentation_report(instrumented_map: Dict[str, List[Dict[str, A
                 "file": abs_path,
                 "signature": method_info["signature"],
                 "code": method_info["code"],
-                "javadoc": method_info["javadoc"]
+                "javadoc": method_info["javadoc"],
+                "relevant_methods": method_info.get("relevant_methods", [])
             })
 
     if report_file is None:
@@ -343,7 +344,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
 
     log.info(f"Correct tests (after filtering): {len(correct_tests)}")
     log.info(f"Trigger tests: {len(trigger_set)}")
-    log.info(f"Total tests to run: {len(expanded_test_names)}")
+    log.info(f"Total tests to run: {len(correct_tests) + len(trigger_set)}")
 
     def run_test_wrapper(args):
         test_name, is_correct = args
@@ -357,7 +358,7 @@ def run_tests(work_dir: str) -> Dict[str, str]:
         test_tasks.append((test_name, False))
 
     # Run tests in parallel
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = [executor.submit(run_test_wrapper, task) for task in test_tasks]
         for future in as_completed(futures):
             future.result()  # Wait for completion and handle any exceptions

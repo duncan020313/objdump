@@ -1,152 +1,20 @@
 package org.instrument;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
-import com.fasterxml.jackson.databind.introspect.AnnotatedMethod;
-import com.fasterxml.jackson.databind.introspect.VisibilityChecker;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.SerializerProvider;
-import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.databind.BeanDescription;
-import com.fasterxml.jackson.databind.SerializationConfig;
-import com.fasterxml.jackson.databind.ser.BeanSerializerModifier;
-import java.io.*;
-import java.util.*;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 public final class DebugDump {
-    // Custom serializer that limits depth to 3
-    private static class DepthLimitedSerializer extends JsonSerializer<Object> {
-        private static final int MAX_DEPTH = 5;
-
-        @Override
-        public void serialize(Object value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
-            serializeWithDepth(value, gen, serializers, 0, new IdentityHashMap<Object, Boolean>());
-        }
-
-      private void serializeWithDepth(Object value, JsonGenerator gen, SerializerProvider serializers, int currentDepth, IdentityHashMap<Object, Boolean> visited) throws IOException {
-            if (currentDepth >= MAX_DEPTH) {
-                gen.writeString("[MAX_DEPTH_REACHED]");
-                return;
-            }
-
-            if (value == null) {
-                gen.writeNull();
-                return;
-            }
-
-            if (visited.containsKey(value)) {
-                gen.writeString("[CYCLE_DETECTED]");
-                return;
-            }
-            visited.put(value, Boolean.TRUE);
-
-            try {
-                if (value instanceof String) {
-                    gen.writeString((String) value);
-                } else if (value instanceof Number) {
-                    // Preserve special floating values as strings
-                    if (value instanceof Double) {
-                        Double d = (Double) value;
-                        if (Double.isNaN(d)) {
-                            gen.writeString("NaN");
-                        } else if (Double.isInfinite(d)) {
-                            gen.writeString(d > 0 ? "Infinity" : "-Infinity");
-                        } else {
-                            gen.writeNumber(value.toString());
-                        }
-                    } else if (value instanceof Float) {
-                        Float f = (Float) value;
-                        if (Float.isNaN(f)) {
-                            gen.writeString("NaN");
-                        } else if (Float.isInfinite(f)) {
-                            gen.writeString(f > 0 ? "Infinity" : "-Infinity");
-                        } else {
-                            gen.writeNumber(value.toString());
-                        }
-                    } else {
-                        gen.writeNumber(value.toString());
-                    }
-                } else if (value instanceof Boolean) {
-                    gen.writeBoolean((Boolean) value);
-                } else if (value instanceof Map) {
-                    gen.writeStartObject();
-                    for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                        String key = String.valueOf(entry.getKey());
-                        gen.writeFieldName(key);
-                        serializeWithDepth(entry.getValue(), gen, serializers, currentDepth + 1, visited);
-                    }
-                    gen.writeEndObject();
-                } else if (value instanceof Collection) {
-                    gen.writeStartArray();
-                    for (Object item : (Collection<?>) value) {
-                        serializeWithDepth(item, gen, serializers, currentDepth + 1, visited);
-                    }
-                    gen.writeEndArray();
-                } else if (value.getClass().isArray()) {
-                    gen.writeStartArray();
-                    int length = java.lang.reflect.Array.getLength(value);
-                    for (int i = 0; i < length; i++) {
-                        Object item = java.lang.reflect.Array.get(value, i);
-                        serializeWithDepth(item, gen, serializers, currentDepth + 1, visited);
-                    }
-                    gen.writeEndArray();
-                } else {
-                    // For other objects, try to serialize their non-static, non-synthetic fields
-                    gen.writeStartObject();
-                    try {
-                        java.lang.reflect.Field[] fields = value.getClass().getDeclaredFields();
-                        for (java.lang.reflect.Field field : fields) {
-                            if (java.lang.reflect.Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) {
-                                continue;
-                            }
-                            field.setAccessible(true);
-                            Object fieldValue = field.get(value);
-                            gen.writeFieldName(field.getName());
-                            serializeWithDepth(fieldValue, gen, serializers, currentDepth + 1, visited);
-                        }
-                    } catch (Exception e) {
-                        gen.writeFieldName("_error");
-                        gen.writeString("[SERIALIZATION_ERROR: " + e.getMessage() + "]");
-                    }
-                    gen.writeEndObject();
-                }
-            } finally {
-                visited.remove(value);
-            }
-        }
-    }
-
-    private static final ObjectMapper M = createObjectMapper();
-
-    private static ObjectMapper createObjectMapper() {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.disable(MapperFeature.USE_ANNOTATIONS);
-        mapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
-
-        // Configure visibility to access all fields
-        mapper.setVisibility(mapper.getSerializationConfig()
-            .getDefaultVisibilityChecker()
-            .withFieldVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY)
-            .withGetterVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE)
-            .withSetterVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE)
-            .withCreatorVisibility(com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE));
-
-        // Register the depth-limited serializer for all objects
-        SimpleModule module = new SimpleModule();
-        module.setSerializerModifier(new BeanSerializerModifier() {
-            @Override
-            public JsonSerializer<?> modifySerializer(SerializationConfig config, BeanDescription beanDesc, JsonSerializer<?> serializer) {
-                return new DepthLimitedSerializer();
-            }
-        });
-        mapper.registerModule(module);
-
-        return mapper;
-    }
-
 
   private DebugDump() {}
 
@@ -155,27 +23,39 @@ public final class DebugDump {
   }
 
   public static void writeEntry(Object self, Map<String, Object> params, String id, String methodSig, String filePath) {
-    write(self, params, null, id, "entry", methodSig, filePath);
+    writeEntry(self, params, id, methodSig, filePath, null);
+  }
+
+  public static void writeEntry(Object self, Map<String, Object> params, String id, String methodSig, String filePath, Map<String, List<String>> fieldFilter) {
+    write(self, params, null, id, "entry", methodSig, filePath, fieldFilter);
   }
 
   public static void writeExit(Object self, Map<String, Object> params, Object ret, String id, String methodSig, String filePath) {
-    write(self, params, ret, id, "exit", methodSig, filePath);
+    writeExit(self, params, ret, id, methodSig, filePath, null);
+  }
+
+  public static void writeExit(Object self, Map<String, Object> params, Object ret, String id, String methodSig, String filePath, Map<String, List<String>> fieldFilter) {
+    write(self, params, ret, id, "exit", methodSig, filePath, fieldFilter);
   }
 
   private static final List<Map<String, Object>> records = new ArrayList<Map<String, Object>>();
   private static final Object lock = new Object();
 
-    private static final int MAX_SERIALIZATION_DEPTH = 5;
-    private static final String FRACTION_CLASS_NAME = "org.apache.commons.math.fraction.Fraction";
+  private static final int MAX_SERIALIZATION_DEPTH = 5;
+  private static final String FRACTION_CLASS_NAME = "org.apache.commons.math.fraction.Fraction";
+  private static final String SELF_ALIAS = "_self";
+  private static final String RET_ALIAS = "_ret";
 
-    private static synchronized void write(Object self, Map<String, Object> params, Object ret, String id, String phase, String methodSig, String filePath) {
+  private static synchronized void write(Object self, Map<String, Object> params, Object ret, String id, String phase, String methodSig, String filePath, Map<String, List<String>> fieldFilter) {
     try {
+      Map<String, Set<String>> normalizedFilter = normalizeFieldFilter(fieldFilter);
+
       Map<String, Object> record = new LinkedHashMap<String, Object>();
       record.put("id", id);
       record.put("phase", phase);
-      record.put("self", sanitizeForJson(self));
-      record.put("params", sanitizeForJson(params));
-      record.put("ret", sanitizeForJson(ret));
+      record.put("self", sanitizeRoot(self, SELF_ALIAS, normalizedFilter));
+      record.put("params", sanitizeParams(params, normalizedFilter));
+      record.put("ret", sanitizeRoot(ret, RET_ALIAS, normalizedFilter));
       record.put("method_signature", methodSig);
       record.put("file_path", filePath);
 
@@ -195,7 +75,7 @@ public final class DebugDump {
         try {
           fw = new FileWriter(outPath, false);
           bw = new BufferedWriter(fw);
-          String json = M.writeValueAsString(records);
+          String json = toJson(records);
           bw.write(json);
           bw.flush();
         } finally {
@@ -204,15 +84,56 @@ public final class DebugDump {
         }
       }
     } catch (Exception e) {
-        throw new RuntimeException(e);
+      throw new RuntimeException(e);
     }
   }
 
-  private static Object sanitizeForJson(Object value) {
-    return sanitizeForJson(value, 0, new IdentityHashMap<Object, Boolean>());
+  private static Object sanitizeRoot(Object value, String alias, Map<String, Set<String>> fieldFilter) {
+    return sanitizeForJson(value, alias, "", 0, new IdentityHashMap<Object, Boolean>(), fieldFilter);
   }
 
-  private static Object sanitizeForJson(Object value, int depth, IdentityHashMap<Object, Boolean> visited) {
+  private static Map<String, Object> sanitizeParams(Map<String, Object> params, Map<String, Set<String>> fieldFilter) {
+    if (params == null) {
+      return null;
+    }
+    Map<String, Object> sanitized = new LinkedHashMap<String, Object>();
+    for (Map.Entry<String, Object> entry : params.entrySet()) {
+      String key = entry.getKey();
+      if (key == null) {
+        key = "null";
+      }
+      sanitized.put(key, sanitizeForJson(entry.getValue(), key, "", 0, new IdentityHashMap<Object, Boolean>(), fieldFilter));
+    }
+    return sanitized;
+  }
+
+  private static Map<String, Set<String>> normalizeFieldFilter(Map<String, List<String>> fieldFilter) {
+    if (fieldFilter == null || fieldFilter.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    Map<String, Set<String>> normalized = new LinkedHashMap<String, Set<String>>();
+    for (Map.Entry<String, List<String>> entry : fieldFilter.entrySet()) {
+      if (entry.getValue() == null) {
+        continue;
+      }
+      LinkedHashSet<String> paths = new LinkedHashSet<String>();
+      for (String rawPath : entry.getValue()) {
+        if (rawPath == null) {
+          continue;
+        }
+        String path = rawPath.trim();
+        if (!path.isEmpty()) {
+          paths.add(path);
+        }
+      }
+      if (!paths.isEmpty()) {
+        normalized.put(entry.getKey(), paths);
+      }
+    }
+    return normalized.isEmpty() ? Collections.<String, Set<String>>emptyMap() : normalized;
+  }
+
+  private static Object sanitizeForJson(Object value, String alias, String currentPath, int depth, IdentityHashMap<Object, Boolean> visited, Map<String, Set<String>> fieldFilter) {
     if (value == null) {
       return null;
     }
@@ -231,15 +152,15 @@ public final class DebugDump {
 
     Object sanitized;
     if (value instanceof Map<?, ?>) {
-      sanitized = sanitizeMap((Map<?, ?>) value, depth, visited);
+      sanitized = sanitizeMap((Map<?, ?>) value, alias, currentPath, depth, visited, fieldFilter);
     } else if (value instanceof Collection<?>) {
-      sanitized = sanitizeCollection((Collection<?>) value, depth, visited);
+      sanitized = sanitizeCollection((Collection<?>) value, alias, currentPath, depth, visited, fieldFilter);
     } else if (value.getClass().isArray()) {
-      sanitized = sanitizeArray(value, depth, visited);
+      sanitized = sanitizeArray(value, alias, currentPath, depth, visited, fieldFilter);
     } else if (FRACTION_CLASS_NAME.equals(value.getClass().getName())) {
       sanitized = sanitizeFraction(value, depth, visited);
     } else {
-      sanitized = sanitizeObjectFields(value, depth, visited);
+      sanitized = sanitizeObjectFields(value, alias, currentPath, depth, visited, fieldFilter);
     }
 
     visited.remove(value);
@@ -290,50 +211,94 @@ public final class DebugDump {
     return sanitized;
   }
 
-  private static Map<String, Object> sanitizeMap(Map<?, ?> map, int depth, IdentityHashMap<Object, Boolean> visited) {
+  private static Map<String, Object> sanitizeMap(Map<?, ?> map, String alias, String currentPath, int depth, IdentityHashMap<Object, Boolean> visited, Map<String, Set<String>> fieldFilter) {
     Map<String, Object> sanitized = new LinkedHashMap<String, Object>();
     for (Map.Entry<?, ?> entry : map.entrySet()) {
       String key = String.valueOf(entry.getKey());
-      sanitized.put(key, sanitizeForJson(entry.getValue(), depth + 1, visited));
+      String nextPath = extendPath(currentPath, key);
+      if (!shouldIncludeField(fieldFilter, alias, nextPath)) {
+        continue;
+      }
+      sanitized.put(key, sanitizeForJson(entry.getValue(), alias, nextPath, depth + 1, visited, fieldFilter));
     }
     return sanitized;
   }
 
-  private static List<Object> sanitizeCollection(Collection<?> collection, int depth, IdentityHashMap<Object, Boolean> visited) {
+  private static List<Object> sanitizeCollection(Collection<?> collection, String alias, String currentPath, int depth, IdentityHashMap<Object, Boolean> visited, Map<String, Set<String>> fieldFilter) {
     List<Object> sanitized = new ArrayList<Object>(collection.size());
     for (Object item : collection) {
-      sanitized.add(sanitizeForJson(item, depth + 1, visited));
+      sanitized.add(sanitizeForJson(item, alias, currentPath, depth + 1, visited, fieldFilter));
     }
     return sanitized;
   }
 
-  private static List<Object> sanitizeArray(Object array, int depth, IdentityHashMap<Object, Boolean> visited) {
+  private static List<Object> sanitizeArray(Object array, String alias, String currentPath, int depth, IdentityHashMap<Object, Boolean> visited, Map<String, Set<String>> fieldFilter) {
     int length = java.lang.reflect.Array.getLength(array);
     List<Object> sanitized = new ArrayList<Object>(length);
     for (int i = 0; i < length; i++) {
       Object item = java.lang.reflect.Array.get(array, i);
-      sanitized.add(sanitizeForJson(item, depth + 1, visited));
+      sanitized.add(sanitizeForJson(item, alias, currentPath, depth + 1, visited, fieldFilter));
     }
     return sanitized;
   }
 
-  private static Map<String, Object> sanitizeObjectFields(Object value, int depth, IdentityHashMap<Object, Boolean> visited) {
+  private static Map<String, Object> sanitizeObjectFields(Object value, String alias, String currentPath, int depth, IdentityHashMap<Object, Boolean> visited, Map<String, Set<String>> fieldFilter) {
     Map<String, Object> sanitized = new LinkedHashMap<String, Object>();
     java.lang.reflect.Field[] fields = value.getClass().getDeclaredFields();
     for (java.lang.reflect.Field field : fields) {
       if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
         continue;
       }
+      String fieldName = field.getName();
+      String nextPath = extendPath(currentPath, fieldName);
+      if (!shouldIncludeField(fieldFilter, alias, nextPath)) {
+        continue;
+      }
       try {
         field.setAccessible(true);
         Object fieldValue = field.get(value);
-        sanitized.put(field.getName(), sanitizeForJson(fieldValue, depth + 1, visited));
+        sanitized.put(fieldName, sanitizeForJson(fieldValue, alias, nextPath, depth + 1, visited, fieldFilter));
       } catch (Exception e) {
-        sanitized.put(field.getName(), "[SERIALIZATION_ERROR: " + e.getMessage() + "]");
+        sanitized.put(fieldName, "[SERIALIZATION_ERROR: " + e.getMessage() + "]");
       }
     }
-    sanitized.put("_type", value.getClass().getName());
+    boolean hasAliasFilter = alias != null && fieldFilter.containsKey(alias);
+    if (!hasAliasFilter || !sanitized.isEmpty()) {
+      sanitized.put("_type", value.getClass().getName());
+    }
     return sanitized;
+  }
+
+  private static boolean shouldIncludeField(Map<String, Set<String>> fieldFilter, String alias, String fieldPath) {
+    if (fieldFilter.isEmpty() || alias == null) {
+      return true;
+    }
+    Set<String> allowed = fieldFilter.get(alias);
+    if (allowed == null || allowed.isEmpty()) {
+      return true;
+    }
+    if (allowed.contains("*")) {
+      return true;
+    }
+    if (fieldPath == null || fieldPath.isEmpty()) {
+      return true;
+    }
+    for (String allowedPath : allowed) {
+      if (allowedPath.equals(fieldPath) || allowedPath.startsWith(fieldPath + ".")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static String extendPath(String currentPath, String segment) {
+    if (segment == null || segment.isEmpty()) {
+      return currentPath;
+    }
+    if (currentPath == null || currentPath.isEmpty()) {
+      return segment;
+    }
+    return currentPath + "." + segment;
   }
 
   private static Object invokeSafe(Object target, String methodName) {
@@ -344,5 +309,113 @@ public final class DebugDump {
     } catch (Exception e) {
       return "[SERIALIZATION_ERROR: " + e.getMessage() + "]";
     }
+  }
+
+  private static String toJson(Object value) {
+    StringBuilder sb = new StringBuilder();
+    appendJson(value, sb);
+    return sb.toString();
+  }
+
+  private static void appendJson(Object value, StringBuilder sb) {
+    if (value == null) {
+      sb.append("null");
+      return;
+    }
+    if (value instanceof String) {
+      appendEscapedString((String) value, sb);
+      return;
+    }
+    if (value instanceof Character) {
+      appendEscapedString(String.valueOf(value), sb);
+      return;
+    }
+    if (value instanceof Number) {
+      sb.append(value.toString());
+      return;
+    }
+    if (value instanceof Boolean) {
+      sb.append(((Boolean) value) ? "true" : "false");
+      return;
+    }
+    if (value instanceof Map<?, ?>) {
+      sb.append('{');
+      boolean first = true;
+      for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+        if (!first) {
+          sb.append(',');
+        }
+        first = false;
+        appendEscapedString(String.valueOf(entry.getKey()), sb);
+        sb.append(':');
+        appendJson(entry.getValue(), sb);
+      }
+      sb.append('}');
+      return;
+    }
+    if (value instanceof Iterable<?>) {
+      sb.append('[');
+      boolean first = true;
+      for (Object element : (Iterable<?>) value) {
+        if (!first) {
+          sb.append(',');
+        }
+        first = false;
+        appendJson(element, sb);
+      }
+      sb.append(']');
+      return;
+    }
+    if (value.getClass().isArray()) {
+      sb.append('[');
+      int length = java.lang.reflect.Array.getLength(value);
+      for (int i = 0; i < length; i++) {
+        if (i > 0) {
+          sb.append(',');
+        }
+        appendJson(java.lang.reflect.Array.get(value, i), sb);
+      }
+      sb.append(']');
+      return;
+    }
+    appendEscapedString(String.valueOf(value), sb);
+  }
+
+  private static void appendEscapedString(String value, StringBuilder sb) {
+    sb.append('"');
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      switch (c) {
+        case '\\':
+          sb.append("\\\\");
+          break;
+        case '"':
+          sb.append("\\\"");
+          break;
+        case '\b':
+          sb.append("\\b");
+          break;
+        case '\f':
+          sb.append("\\f");
+          break;
+        case '\n':
+          sb.append("\\n");
+          break;
+        case '\r':
+          sb.append("\\r");
+          break;
+        case '\t':
+          sb.append("\\t");
+          break;
+        default:
+          if (c < 0x20) {
+            sb.append(String.format("\\u%04x", (int) c));
+          } else {
+            sb.append(c);
+          }
+          break;
+      }
+    }
+    sb.append('"');
   }
 }

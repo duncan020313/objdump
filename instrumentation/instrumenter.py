@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import logging
 
+from instrumentation.ts import find_relevant_methods
+
 log = logging.getLogger(__name__)
 
 def get_instrumenter_jar_path() -> str:
@@ -31,6 +33,20 @@ def normalize_signature(signature: str) -> str:
     normalized = re.sub(r'\(\s+', '(', normalized)
     normalized = re.sub(r'\s+\)', ')', normalized)
     normalized = re.sub(r"[^a-zA-Z0-9\s\(\),\<\>\{\}\[\]]", "", normalized)
+
+    # Ensure array brackets attach to the type rather than the variable name (e.g., byte b[] -> byte[] b)
+    def fix_array_notation(match: re.Match) -> str:
+        type_part = match.group('type')
+        name_part = match.group('name')
+        brackets = match.group('brackets') or ''
+        brackets = brackets.replace(' ', '')
+        return f"{type_part}{brackets} {name_part}"
+
+    normalized = re.sub(
+        r"(?P<type>[A-Za-z0-9_\.\$<>]+)\s+(?P<name>[A-Za-z0-9_\$]+)(?P<brackets>(?:\[\s*\])+)",
+        fix_array_notation,
+        normalized
+    )
     return normalized
 
 def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[Dict[str, Any]]:
@@ -51,6 +67,8 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
 
     # Normalize target signatures to remove 'final' modifiers
     normalized_signatures = [normalize_signature(sig) for sig in target_signatures]
+
+    relevant_methods_map = find_relevant_methods(java_file, target_signatures)
 
     # Get JAR path
     jar_path = get_instrumenter_jar_path()
@@ -92,10 +110,14 @@ def instrument_java_file(java_file: str, target_signatures: List[str]) -> List[D
                 if "throws" not in javadoc:
                     javadoc["throws"] = {}
 
+            normalized_output_signature = normalize_signature(item["signature"])
+            relevant_methods = relevant_methods_map.get(normalized_output_signature, [])
+
             results.append({
                 "signature": item["signature"],
                 "javadoc": javadoc,
-                "code": item["code"]
+                "code": item["code"],
+                "relevant_methods": relevant_methods
             })
 
         return results

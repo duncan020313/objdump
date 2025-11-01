@@ -12,7 +12,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -28,17 +30,20 @@ public class MethodExtractor {
         public MethodDeclaration methodDeclaration;
         public ConstructorDeclaration constructorDeclaration;
         public boolean isConstructor;
+        public Map<String, List<String>> fieldFilter;
 
         public MethodInfo(String signature, MethodDeclaration method) {
             this.signature = signature;
             this.methodDeclaration = method;
             this.isConstructor = false;
+            this.fieldFilter = new LinkedHashMap<>();
         }
 
         public MethodInfo(String signature, ConstructorDeclaration constructor) {
             this.signature = signature;
             this.constructorDeclaration = constructor;
             this.isConstructor = true;
+            this.fieldFilter = new LinkedHashMap<>();
         }
     }
 

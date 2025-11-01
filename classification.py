@@ -362,10 +362,12 @@ def check_dump_status(dumps_base_dir: str, project_id: str, bug_id: str) -> Dict
     total_count = wrong_count + correct_count
     
     # Success criteria: at least 1 failed dump (wrong/)
-    if wrong_count > 0:
+    if wrong_count > 0 and correct_count > 0:
         status = "success"
-    elif total_count > 0:
+    elif correct_count > 0:
         status = "no_failed_dumps"
+    elif wrong_count > 0:
+        status = "no_correct_dumps"
     else:
         status = "no_dumps"
     

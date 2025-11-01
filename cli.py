@@ -107,7 +107,7 @@ def load_failed_bugs(csv_path: str) -> Dict[str, Set[int]]:
     """
     log = logging.getLogger("load_failed_bugs")
     failed_bugs = {}
-    failed_statuses = {"no_dumps", "not_found", "no_failed_dumps"}
+    failed_statuses = {"no_dumps", "not_found", "no_failed_dumps", "no_correct_dumps"}
 
     if not os.path.exists(csv_path):
         log.error(f"Error: {csv_path} not found")
